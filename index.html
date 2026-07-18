@@ -2017,18 +2017,21 @@ async function flythrough(){
   const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
   ctx.imageSmoothingQuality="high";
   let rec,parts=[];
-  try{const stream=cv.captureStream(30); rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8e6});
+  try{const stream=cv.captureStream(30); rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:16e6});
   }catch(e){btn.textContent="Recorder failed";setTimeout(()=>btn.textContent=old,2500);btn.disabled=false;return;}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
   const done=new Promise(res=>rec.onstop=res); rec.start(1000);   // timeslice so the tail isn't dropped
-  const DRAW=12000, SETTLE=500, ZOUT=3000, HOLD=1700, t0=performance.now();
+  // animation length scales with ride distance so the reveal speed stays sane (a 400 km day ≈ 11 s,
+  // clamped so short rides aren't too quick and whole-tour ranges aren't endless)
+  const DRAW=Math.round(Math.min(26000,Math.max(8000,total*28)));
+  const SETTLE=500, ZOUT=3000, HOLD=1700, t0=performance.now();
   btn.textContent="Recording…";
   const easeIO=e=>e<.5?2*e*e:1-((-2*e+2)**2)/2;
   // reveal velocity: constant for the first C of the draw, then ramps to 0 → the line
   // glides to a stop before the zoom-out (no speed jump; area under the curve = 1)
   const RC=0.72, RV=2/(1+RC);
   const revealFrac=p=>{if(p<=RC)return RV*p;const u=p-RC;return RV*RC+RV*(u-u*u/(2*(1-RC)));};
-  let camX=null,camY=null,snap=null; const SMOOTH=0.11;   // exponential follow-cam damping
+  let camX=null,camY=null,snap=null; const SMOOTH=total>700?0.07:0.11;   // gentler follow-cam pan on longer routes
   function frame(){
     const el=performance.now()-t0; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
     if(el<DRAW+SETTLE){                       // draw + a brief settle held on the finished detail view
