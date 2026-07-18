@@ -22,7 +22,7 @@ Drop your `Timeline.json` (or a `.gpx` / `.csv`), pick a date range, and get:
 - **Rally roadbook** — export rally-style pace notes (distance · direction · severity · angle) as a text file.
 - **Compare riders** — drop a mate's GPX/CSV to overlay their track and duel the twistiness scores.
 - **Weather** — optional keyless historical weather (temp / rain / wind) for the ride, via Open-Meteo.
-- **Flythrough clip** — a WebM of the route drawing on, with live distance & speed, for Stories/Reels.
+- **Flythrough clip** — an MP4 of the route drawing on over the map at constant speed, with the full ride-card stats, for Stories/Reels.
 - **Per-day GPX (ZIP)** — one GPX per day in the range, ready to sync against action-cam footage.
 - **Instant reopen** — your last import is cached locally (IndexedDB), so revisiting restores it without re-loading the big file (clearable, never leaves your device).
 
