@@ -11,8 +11,20 @@ Drop your `Timeline.json` (or a `.gpx` / `.csv`), pick a date range, and get:
 - Distance, moving time, average & max speed, elevation gain
 - **Bend counts** (L/R split) and a **twistiness score** (°/km), with a best-10 km rolling window — optional "match to roads" recovers the corners sparse GPS misses
 - A **speed-coloured map** (real basemap tiles) and an elevation + speed **profile chart**
-- **Ride-card PNGs** in three layouts (vertical / square / widescreen) to share to WhatsApp, Instagram, etc.
+- **Ride-card PNGs** in three layouts (vertical / square / widescreen), with an optional rider name — share to WhatsApp, Instagram, etc.
 - Clean **GPX / CSV / Timeline-slice JSON** exports for just the dates you chose
+
+…plus:
+
+- **Tour summary** — pick a multi-day range for a per-day breakdown (km, twistiness, top speed, bends) and trip totals; click any day to jump to it.
+- **Best bit** — one tap frames the twistiest ~10 km of the ride on the map.
+- **Stops** — coffee/fuel/lunch stops with durations, pulled straight from the data (no lookups).
+- **Rally roadbook** — export rally-style pace notes (distance · direction · severity · angle) as a text file.
+- **Compare riders** — drop a mate's GPX/CSV to overlay their track and duel the twistiness scores.
+- **Weather** — optional keyless historical weather (temp / rain / wind) for the ride, via Open-Meteo.
+- **Flythrough clip** — a WebM of the route drawing on, with live distance & speed, for Stories/Reels.
+- **Per-day GPX (ZIP)** — one GPX per day in the range, ready to sync against action-cam footage.
+- **Instant reopen** — your last import is cached locally (IndexedDB), so revisiting restores it without re-loading the big file (clearable, never leaves your device).
 
 Everything parses in your browser. **Your location data is never uploaded** — the only network calls are optional and disclosed (map tiles, and the opt-in road-matching request).
 

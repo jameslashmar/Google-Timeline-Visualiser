@@ -548,6 +548,25 @@
 
   :root{--sw-bg:#171c23;--sw-fg:#8b94a1;--sw-bd:#242b35;--sw-on:#9d7bff;--sw-onfg:#0f1216}
 </style>
+<style id="addon">
+  /* always-on component styles for the extra features — theme-neutral so they read on all three liveries */
+  [hidden]{display:none!important}   /* component classes (.export/.note) set display and would otherwise beat the UA hidden rule */
+  .panel{margin-top:12px;border:1px solid rgba(140,150,165,.28);border-radius:8px;background:rgba(140,150,165,.06);overflow:hidden;font-family:var(--sans,sans-serif)}
+  .panel>summary{cursor:pointer;padding:9px 12px;font-weight:600;font-size:13px;list-style:none;display:flex;align-items:center;gap:8px}
+  .panel>summary::-webkit-details-marker{display:none}
+  .panel .cnt{opacity:.6;font-family:var(--mono,monospace);font-size:11px}
+  .panel>div{padding:2px 12px 12px}
+  table.mini-t{width:100%;border-collapse:collapse;font-size:12px}
+  table.mini-t th,table.mini-t td{text-align:right;padding:4px 6px;border-top:1px solid rgba(140,150,165,.18);white-space:nowrap}
+  table.mini-t th:first-child,table.mini-t td:first-child{text-align:left}
+  table.mini-t thead th{border-top:0;opacity:.6;font-weight:600;font-family:var(--mono,monospace);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+  table.mini-t tbody tr.clk{cursor:pointer} table.mini-t tbody tr.clk:hover td{background:rgba(140,150,165,.12)}
+  .stoprow{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid rgba(140,150,165,.18);font-size:12px}
+  .stoprow:first-child{border-top:0}
+  #duel{margin-top:6px}
+  .duelrow{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:6px 9px;border-radius:6px;border:1px solid rgba(140,150,165,.25);margin-top:6px}
+  .duelrow b{font-weight:700}
+</style>
 <script>(function(){let t="dash";try{t=localStorage.getItem("tx_theme")||"dash"}catch(e){}
 if(!["dash","roadbook","dark"].includes(t))t="dash";
 document.documentElement.dataset.theme=t;
@@ -579,6 +598,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
           <div class="small">or click to browse · <b>Timeline.json</b> Pixel: Settings → Location → Location Services → Timeline → Export · <b>.gpx</b> from an action cam / GPS logger (denser = truer bends) · <b>.csv</b> re-imports this tool's own export</div>
         </div>
         <input type="file" id="file" accept=".json,.gpx,.csv,application/json,application/gpx+xml,text/csv">
+        <button class="export" id="restoreBtn" hidden style="margin-top:8px"></button>
 
         <div id="driveBlock">
         <div class="or"><span>or</span></div>
@@ -609,7 +629,11 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
           <button class="export" id="exJson" disabled>Timeline slice <span class="fmt">JSON</span></button>
           <button class="export" id="exGpx" disabled>GPS track <span class="fmt">GPX</span></button>
           <button class="export" id="exCsv" disabled>Position fixes <span class="fmt">CSV</span></button>
+          <button class="export" id="exGpxDays" disabled>Per-day GPX <span class="fmt">ZIP</span></button>
+          <button class="export" id="exRoad" disabled>Roadbook pace-notes <span class="fmt">TXT</span></button>
+          <button class="export" id="exFly" disabled>Flythrough clip <span class="fmt">WEBM</span></button>
         </div>
+        <div class="field" style="margin-top:14px"><label for="riderName">Rider name <span style="opacity:.6">(optional — printed on cards)</span></label><input type="text" id="riderName" placeholder="e.g. Jay" autocomplete="off" spellcheck="false" maxlength="24"></div>
         <div class="sharebar">
           <span class="sharelab">Ride card <span class="fmt2">PNG · share</span></span>
           <button class="cardbtn" data-layout="vertical" disabled title="Vertical — story format" aria-label="Share vertical ride card">
@@ -621,6 +645,11 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
           <button class="cardbtn" data-layout="horizontal" disabled title="Horizontal — widescreen" aria-label="Share horizontal ride card">
             <svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="7" width="18" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
           </button>
+        </div>
+        <div class="field" style="margin-top:16px"><label>Compare another rider <span style="opacity:.6">(GPX / CSV)</span></label>
+          <button class="export" id="addRider" disabled>＋ Add rider track</button>
+          <input type="file" id="riderFile" accept=".gpx,.csv" hidden>
+          <div id="duel"></div>
         </div>
         <p class="privacy"><b>Private by design:</b> no server, no analytics. Parsing and exports happen entirely in this tab. The only network calls are optional: <span id="privDrive">Google Drive sign-in/download (direct from Google to your browser) and </span>map tiles from OpenStreetMap/CARTO (loaded by default for Map view — switch to Abstract view for a fully offline session) — your data still touches nothing else. View source to verify.</p>
       </div>
@@ -646,8 +675,12 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
         </div>
         <div class="refinebar">
           <button id="matchBtn" class="mini" type="button" title="Snap track to OSM road geometry for accurate bend counts">⌖ match to roads</button>
+          <button id="bestBtn" class="mini" type="button" disabled title="Frame the twistiest ~10 km of the ride">◎ best 10 km</button>
+          <button id="wxBtn" class="mini" type="button" disabled title="Historical weather for this ride (Open-Meteo, opt-in)">☁ weather</button>
           <span class="refnote" id="refnote">⌖ match to roads snaps your trace to the real road network to recover corners the sparse GPS can't see. Opt-in: sends the selected range's coordinates to the public FOSSGIS Valhalla server (valhalla1.openstreetmap.de).</span>
         </div>
+        <div id="wxOut" class="note" hidden></div>
+        <div id="bestOut" class="note" hidden></div>
         <div id="trackbox">
           <button id="mapToggle" type="button" title="Toggle real map tiles">Map view</button>
           <button id="fsToggle" type="button" title="Fullscreen">⛶ Fullscreen</button>
@@ -663,6 +696,8 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
         </div>
         <div id="daylist"></div>
         <div class="legend"><span class="sw s0"></span>slow <span class="sw s1"></span> <span class="sw s2"></span> <span class="sw s3"></span>fast · track coloured by speed</div>
+        <details id="tourWrap" class="panel" hidden><summary>Tour summary <span class="cnt" id="tourN"></span></summary><div id="tour"></div></details>
+        <details id="stopsWrap" class="panel" hidden><summary>Stops <span class="cnt" id="stopsN"></span></summary><div id="stops"></div></details>
         <p class="note" id="note"></p>
       </div>
     </div>
@@ -760,6 +795,7 @@ function parseText(text,name,size){
       drop.classList.add("loaded");
       drop.querySelector(".big").textContent="Loaded "+name;
       drop.querySelector(".small").textContent=raw.length.toLocaleString()+" points · "+kind+" · "+(size/1e6).toFixed(1)+" MB";
+      if(typeof cacheCurrent==="function")setTimeout(()=>cacheCurrent(name),50);
       return;
     }
     DATA=JSON.parse(text);                              // Timeline.json
@@ -769,6 +805,7 @@ function parseText(text,name,size){
     drop.classList.add("loaded");
     drop.querySelector(".big").textContent="Loaded "+name;
     drop.querySelector(".small").textContent=DATA.semanticSegments.length.toLocaleString()+" segments · "+DATA.rawSignals.length.toLocaleString()+" raw signals · "+(size/1e6).toFixed(1)+" MB";
+    if(typeof cacheCurrent==="function")setTimeout(()=>cacheCurrent(name),50);
   }catch(err){
     drop.classList.remove("loaded");
     drop.querySelector(".big").textContent="Couldn't parse that file";
@@ -819,6 +856,9 @@ async function shareCard(layout){
   const horiz=layout==="horizontal";
   const eyeFs=W*0.015, dateFs=W*(horiz?0.034:0.046);
   ctx.fillStyle=P.accent;ctx.font=mono(eyeFs);ctx.fillText("TIMELINE ROADBOOK",M,M);
+  const rider=(($("riderName")&&$("riderName").value)||"").trim();
+  if(rider){ctx.textAlign="right";ctx.fillStyle=P.fg;ctx.font=mono(eyeFs);
+    ctx.fillText(rider.toUpperCase(),W-M,M);ctx.textAlign="left";}
   ctx.fillStyle=P.fg;ctx.font=cond(800,dateFs);
   ctx.fillText(a===b?dfmt(a):dfmt(a)+" — "+dfmt(b),M,M+eyeFs*1.6);
   const headH=Math.round(M+eyeFs*1.6+dateFs*1.15+W*0.02);
@@ -1311,7 +1351,7 @@ function index(){
     $("d1").min=$("d2").min=days[0]; $("d1").max=$("d2").max=days[days.length-1];
     $("d1").value=$("d2").value=days[days.length-1];
     $("d1").disabled=$("d2").disabled=false;
-    ["exJson","exGpx","exCsv"].forEach(id=>$(id).disabled=false);
+    ["exJson","exGpx","exCsv","exGpxDays","exRoad","exFly","addRider","bestBtn","wxBtn"].forEach(id=>$(id).disabled=false);
     document.querySelectorAll(".cardbtn").forEach(b=>b.disabled=false);
   }
   renderDayList(days);
@@ -1388,6 +1428,7 @@ function refresh(){
   drawTrack(pos);
   drawProfile(pos);
   if(mapOn) drawMap(pos);
+  if(typeof updateExtras==="function") updateExtras(pos);
 }
 
 function bearing(la1,lo1,la2,lo2){
@@ -1396,22 +1437,22 @@ function bearing(la1,lo1,la2,lo2){
   return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
 
-function rideStats(pos,km){
-  let moveMs=0,climb=0,turnSum=0,bendL=0,bendR=0;
-  // moving time: gaps <15min where we actually travelled or had speed
+// Pure ride-metric computation (no DOM) — reused by the day view, tour summary,
+// best-bit finder and multi-rider duel. Mirrors the original rideStats maths exactly.
+function computeRide(pos){
+  let km=0,moveMs=0,climb=0,turnSum=0,bendL=0,bendR=0,vmax=0;
   for(let i=1;i<pos.length;i++){
-    const dt=pos[i][0]-pos[i-1][0];
-    if(dt<15*60*1000 && (hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3])>0.02 || pos[i][4]>2)) moveMs+=dt;
+    const dt=pos[i][0]-pos[i-1][0], dk=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
+    if(dt<15*60*1000){ km+=dk; if(dk>0.02||pos[i][4]>2) moveMs+=dt; }
+    if(pos[i][4]) vmax=Math.max(vmax,pos[i][4]);
   }
-  // elevation gain on a lightly smoothed altitude series, ignore <4m jitter
-  const alts=pos.filter(p=>p[5]!=null);
-  let lastA=null;
+  if(pos[0]&&pos[0][4]) vmax=Math.max(vmax,pos[0][4]);
+  const alts=pos.filter(p=>p[5]!=null); let lastA=null;
   for(let i=0;i<alts.length;i++){
     const w=alts.slice(Math.max(0,i-2),i+3), a=w.reduce((s,p)=>s+p[5],0)/w.length;
     if(lastA!=null){const d=a-lastA;if(d>4){climb+=d;lastA=a;}else if(d<-4){lastA=a;}}
     else lastA=a;
   }
-  // bends: heading changes between moving fixes, count sustained turns >=40°
   let prevB=null,acc=0;
   for(let i=1;i<pos.length;i++){
     const dt=pos[i][0]-pos[i-1][0], dk=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
@@ -1419,7 +1460,7 @@ function rideStats(pos,km){
     const b=bearing(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
     if(prevB!=null){
       let d=((b-prevB+540)%360)-180;   // -180..180, +ve = right
-      if(Math.abs(d)<100){             // ignore GPS spikes / U-turn noise
+      if(Math.abs(d)<100){
         turnSum+=Math.abs(d);
         if(acc!==0 && Math.sign(d)!==Math.sign(acc)) acc=0;
         acc+=d;
@@ -1428,13 +1469,17 @@ function rideStats(pos,km){
     }
     prevB=b;
   }
-  const h=Math.floor(moveMs/36e5),m=Math.round(moveMs%36e5/6e4);
-  $("sMove").textContent=moveMs?(h?h+"h ":"")+m+"m":"—";
-  STATS.avg=moveMs&&km?km/(moveMs/36e5):null;
-  STATS.climb=alts.length>5?climb:null;
-  $("sBends").textContent=(bendL+bendR)?`${bendL+bendR} (${bendL}/${bendR})`:"—";
-  STATS.twistBest=null;
-  if(km>1)STATS.twist=turnSum/km;else{STATS.twist=null;$("sTwist").textContent="—";$("sTwistK").textContent="twistiness";}
+  return {km,moveMs,climb:alts.length>5?climb:null,max:vmax?vmax*3.6:null,
+          bendL,bendR,bends:bendL+bendR,turnSum,
+          avg:(moveMs&&km)?km/(moveMs/36e5):null, twist:km>1?turnSum/km:null};
+}
+function fmtDur(ms){const h=Math.floor(ms/36e5),m=Math.round(ms%36e5/6e4);return ms?(h?h+"h ":"")+m+"m":"—";}
+function rideStats(pos,km){
+  const r=computeRide(pos);
+  $("sMove").textContent=fmtDur(r.moveMs);
+  STATS.avg=r.avg; STATS.climb=r.climb; STATS.twistBest=null; STATS.twist=r.twist;
+  $("sBends").textContent=r.bends?`${r.bends} (${r.bendL}/${r.bendR})`:"—";
+  if(r.twist==null){$("sTwist").textContent="—";$("sTwistK").textContent="twistiness";}
   renderStats();
 }
 
@@ -1639,6 +1684,258 @@ $("exCsv").addEventListener("click",()=>{
   for(const p of pos) c+=`${p[1]},${p[2]},${p[3]},${p[4]?(p[4]*3.6).toFixed(1):""},${p[5]??""},${p[6]}\n`;
   save(`Timeline-${a}${a!==b?"_to_"+b:""}.csv`,c,"text/csv");
 });
+
+/* ===================== EXTRA FEATURES ===================== */
+function saveBlob(name,blob){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),8000);}
+
+// ---- rider name (persisted) ----
+try{$("riderName").value=localStorage.getItem("tx_rider")||"";}catch(e){}
+$("riderName").addEventListener("input",()=>{try{localStorage.setItem("tx_rider",$("riderName").value)}catch(e){}});
+
+// ---- GPX helper + per-day ZIP (tiny store-only zip writer, no deps) ----
+function gpxFor(pos,name){
+  let g=`<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Google Timeline Visualiser" xmlns="http://www.topografix.com/GPX/1/1">\n<trk><name>${esc(name)}</name>\n`;
+  let open=false,last=0;
+  for(const p of pos){ if(!open||p[0]-last>GAP){if(open)g+="</trkseg>\n";g+="<trkseg>\n";open=true;}
+    g+=`<trkpt lat="${p[2]}" lon="${p[3]}">`+(p[5]!=null?`<ele>${p[5]}</ele>`:"")+`<time>${new Date(p[0]).toISOString()}</time></trkpt>\n`; last=p[0]; }
+  if(open)g+="</trkseg>\n"; g+="</trk>\n</gpx>\n"; return g;
+}
+function crc32(b){let c=~0;for(let i=0;i<b.length;i++){c^=b[i];for(let k=0;k<8;k++)c=(c>>>1)^(0xEDB88320&-(c&1));}return ~c>>>0;}
+function zipStore(files){
+  const enc=new TextEncoder(),parts=[],central=[]; let off=0;
+  const u16=n=>[n&255,(n>>8)&255], u32=n=>[n&255,(n>>8)&255,(n>>16)&255,(n>>24)&255];
+  for(const f of files){
+    const nm=enc.encode(f.name),d=f.data,crc=crc32(d);
+    const loc=[...u32(0x04034b50),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(d.length),...u32(d.length),...u16(nm.length),...u16(0)];
+    parts.push(new Uint8Array(loc),nm,d);
+    central.push(new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(d.length),...u32(d.length),...u16(nm.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]),nm);
+    off+=loc.length+nm.length+d.length;
+  }
+  let cs=0; for(const c of central)cs+=c.length;
+  const end=[...u32(0x06054b50),...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(cs),...u32(off),...u16(0)];
+  return new Blob([...parts,...central,new Uint8Array(end)],{type:"application/zip"});
+}
+function perDayGpx(){
+  const {a,b,pos}=slice(); const enc=new TextEncoder(); const byDay=new Map();
+  for(const p of pos){const d=p[1].slice(0,10); if(!byDay.has(d))byDay.set(d,[]); byDay.get(d).push(p);}
+  const files=[]; for(const d of [...byDay.keys()].sort()){const dp=byDay.get(d); if(dp.length<2)continue; files.push({name:`ride-${d}.gpx`,data:enc.encode(gpxFor(dp,"Ride "+d))});}
+  if(!files.length){$("bestOut").hidden=false;$("bestOut").textContent="No track in the selected range.";return;}
+  saveBlob(`Timeline-perday-${a}${a!==b?"_"+b:""}.zip`,zipStore(files));
+}
+$("exGpxDays").addEventListener("click",perDayGpx);
+
+// ---- best bit: twistiest ~10 km window (two-pointer over cumulative distance) ----
+let bestLayer=null;
+function bestWindow(pos,winKm){
+  winKm=winKm||10; if(pos.length<5)return null;
+  const cum=[0]; for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0];cum[i]=cum[i-1]+(dt<GAP?hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]):0);}
+  const pref=[0]; let prevB=null;
+  for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0],dk=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);let t=0;
+    if(!(dt>=GAP||dk<0.015)){const b=bearing(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
+      if(prevB!=null){let d=((b-prevB+540)%360)-180;if(Math.abs(d)<100)t=Math.abs(d);} prevB=b;} else prevB=null;
+    pref[i]=pref[i-1]+t;}
+  let best=null,k=0;
+  for(let i=0;i<pos.length;i++){ if(k<i)k=i; while(k<pos.length-1&&cum[k]-cum[i]<winKm)k++;
+    const dkm=cum[k]-cum[i]; if(dkm<winKm*0.6)break; const dens=(pref[k]-pref[i])/dkm;
+    if(!best||dens>best.dens)best={i0:i,i1:k,dens,km:dkm}; }
+  return best;
+}
+function showBest(){
+  const {pos}=slice(); const bw=bestWindow(pos);
+  if(!bw){$("bestOut").hidden=false;$("bestOut").textContent="Not enough track to find a best bit.";return;}
+  const seg=pos.slice(bw.i0,bw.i1+1), ll=seg.map(p=>[p[2],p[3]]);
+  if(LMAP){ if(!bestLayer)bestLayer=L.layerGroup().addTo(LMAP); bestLayer.clearLayers();
+    L.polyline(ll,{color:"#ffffff",weight:8,opacity:.45,lineJoin:"round"}).addTo(bestLayer);
+    L.polyline(ll,{color:tcfg().end,weight:3,opacity:1,lineJoin:"round"}).addTo(bestLayer);
+    LMAP.fitBounds(ll,{padding:[40,40]}); }
+  const score=Math.min(10,bw.dens/35);
+  $("bestOut").hidden=false;
+  $("bestOut").textContent=`◎ Best ${bw.km.toFixed(1)} km — ${score.toFixed(1)}/10 (${Math.round(bw.dens)}°/km) from ${seg[0][1].slice(11,16)}. Highlighted on the map.`;
+}
+$("bestBtn").addEventListener("click",showBest);
+
+// ---- stops (from visit segments; time + duration only, privacy-clean) ----
+function renderStops(segs){
+  const v=segs.filter(s=>s.visit).map(s=>({t0:Date.parse(s.startTime),t1:Date.parse(s.endTime)}))
+    .filter(x=>x.t1>x.t0&&x.t1-x.t0>3*60*1000).sort((a,b)=>a.t0-b.t0);
+  const wrap=$("stopsWrap");
+  if(!v.length){wrap.hidden=true;$("stops").innerHTML="";return;}
+  wrap.hidden=false; $("stopsN").textContent=v.length; const hm=t=>new Date(t).toTimeString().slice(0,5);
+  $("stops").innerHTML=v.map(x=>`<div class="stoprow"><span>${hm(x.t0)}–${hm(x.t1)}</span><span>${fmtDur(x.t1-x.t0)} stop</span></div>`).join("");
+}
+
+// ---- tour summary (per-day stats + totals when the range spans >1 day) ----
+function renderTour(pos,a,b){
+  const wrap=$("tourWrap");
+  if(a===b){wrap.hidden=true;return;}
+  const byDay=new Map(); for(const p of pos){const d=p[1].slice(0,10); if(!byDay.has(d))byDay.set(d,[]); byDay.get(d).push(p);}
+  const days=[]; for(const d of [...byDay.keys()].sort()){const dp=byDay.get(d); if(dp.length<2)continue; days.push({d,r:computeRide(dp)});}
+  if(days.length<2){wrap.hidden=true;return;}
+  wrap.hidden=false; $("tourN").textContent=days.length+" days";
+  const tot=days.reduce((s,x)=>({km:s.km+x.r.km,move:s.move+x.r.moveMs,climb:s.climb+(x.r.climb||0),bends:s.bends+x.r.bends}),{km:0,move:0,climb:0,bends:0});
+  const km=v=>IMP()?(v*KM2MI).toFixed(0):v.toFixed(0), sp=v=>v==null?"–":Math.round(IMP()?v*KM2MI:v), tw=r=>r.twist!=null?Math.min(10,r.twist/35).toFixed(1):"–";
+  const rows=days.map(x=>`<tr class="clk" data-day="${x.d}"><td>${x.d.slice(5)}</td><td>${km(x.r.km)}</td><td>${tw(x.r)}</td><td>${sp(x.r.max)}</td><td>${x.r.bends}</td></tr>`).join("");
+  $("tour").innerHTML=`<table class="mini-t"><thead><tr><th>Day</th><th>${IMP()?"mi":"km"}</th><th>twist</th><th>${IMP()?"mph":"km/h"}</th><th>bends</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="note" style="margin-top:6px"><b>${days.length}</b> riding days · <b>${km(tot.km)}</b> ${IMP()?"mi":"km"} · ${fmtDur(tot.move)} moving · <b>${Math.round(IMP()?tot.climb*M2FT:tot.climb).toLocaleString()}</b> ${IMP()?"ft":"m"} climbed · <b>${tot.bends.toLocaleString()}</b> bends</div>`;
+  $("tour").querySelectorAll("tr.clk").forEach(tr=>tr.addEventListener("click",()=>{$("d1").value=$("d2").value=tr.dataset.day;refresh();}));
+}
+
+// ---- multi-rider overlay & duel ----
+const RIDER_COLORS=["#00E5FF","#FF3DAE","#FFD400","#7CFF00"]; let RIDERS=[],riderLayer=null;
+function addRiderFile(f){
+  const r=new FileReader();
+  r.onload=()=>{ try{
+    const lower=f.name.toLowerCase(),head=r.result.slice(0,400);
+    const raw=(lower.endsWith(".gpx")||/^\s*<\?xml|<gpx[\s>]/i.test(head))?parseGPX(r.result):parseCSV(r.result);
+    const pos=raw.map(s=>{const ll=parseLL(s.position.LatLng);return [Date.parse(s.position.timestamp),s.position.timestamp,ll[0],ll[1],s.position.speedMetersPerSecond||0,s.position.altitudeMeters,s.position.source];}).filter(p=>p[2]!=null).sort((a,b)=>a[0]-b[0]);
+    if(pos.length<2)throw new Error("no track points");
+    RIDERS.push({name:f.name.replace(/\.(gpx|csv)$/i,""),pos,stats:computeRide(pos),color:RIDER_COLORS[RIDERS.length%RIDER_COLORS.length]});
+    drawRiders(); renderDuel();
+  }catch(e){$("duel").innerHTML=`<div class="note">Couldn't add rider: ${esc(e.message)}</div>`;} };
+  r.readAsText(f);
+}
+function drawRiders(){ if(!LMAP)return; if(!riderLayer)riderLayer=L.layerGroup().addTo(LMAP); riderLayer.clearLayers();
+  const all=[]; for(const rd of RIDERS){const line=rd.pos.map(p=>[p[2],p[3]]); all.push(...line); L.polyline(line,{color:rd.color,weight:3,opacity:.85}).addTo(riderLayer);}
+  if(all.length){const mine=slice().pos.map(p=>[p[2],p[3]]); LMAP.fitBounds([...mine,...all],{padding:[30,30]});}
+}
+function renderDuel(){
+  if(!RIDERS.length){$("duel").innerHTML="";return;}
+  const km=v=>v==null?"–":(IMP()?(v*KM2MI).toFixed(0):v.toFixed(0)), sp=v=>v==null?"–":Math.round(IMP()?v*KM2MI:v), tw=r=>r.twist!=null?Math.min(10,r.twist/35).toFixed(1):"–";
+  const rows=[{name:"You",color:tcfg().end,stats:computeRide(slice().pos)},...RIDERS];
+  $("duel").innerHTML=rows.map(r=>`<div class="duelrow" style="border-color:${r.color}"><span style="color:${r.color}">■ <b>${esc(r.name)}</b></span><span>${km(r.stats.km)} ${IMP()?"mi":"km"}</span><span>${tw(r.stats)}/10</span><span>${sp(r.stats.max)} ${IMP()?"mph":"km/h"}</span></div>`).join("")
+    +`<div class="note" style="margin-top:6px">Overlaid on the map. <a href="#" id="clrRiders">clear</a></div>`;
+  const c=$("clrRiders"); if(c)c.addEventListener("click",e=>{e.preventDefault();RIDERS=[];if(riderLayer)riderLayer.clearLayers();$("duel").innerHTML="";});
+}
+$("addRider").addEventListener("click",()=>$("riderFile").click());
+$("riderFile").addEventListener("change",()=>{if($("riderFile").files[0])addRiderFile($("riderFile").files[0]);$("riderFile").value="";});
+
+// ---- weather (Open-Meteo, keyless; forecast API covers recent, archive for older) ----
+async function weather(){
+  const {a,b,pos}=slice(); if(!pos.length)return;
+  const btn=$("wxBtn"),out=$("wxOut"),mid=pos[Math.floor(pos.length/2)];
+  out.hidden=false; out.textContent="☁ fetching weather…"; btn.disabled=true;
+  const q=`latitude=${mid[2].toFixed(3)}&longitude=${mid[3].toFixed(3)}&start_date=${a}&end_date=${b}&hourly=temperature_2m,precipitation,wind_speed_10m&timezone=auto`;
+  try{
+    let H=null;
+    for(const u of [`https://api.open-meteo.com/v1/forecast?${q}`,`https://archive-api.open-meteo.com/v1/archive?${q}`]){
+      const r=await fetch(u); if(!r.ok)continue; const j=await r.json();
+      if(j&&j.hourly&&j.hourly.time&&j.hourly.time.some((_,i)=>j.hourly.temperature_2m[i]!=null)){H=j.hourly;break;} }
+    if(!H)throw new Error("no data for those dates");
+    const t0=pos[0][0],t1=pos[pos.length-1][0]; let temps=[],pr=0,wind=0;
+    const pick=(lo,hi)=>{temps=[];pr=0;wind=0;for(let i=0;i<H.time.length;i++){const tt=Date.parse(H.time[i]);if(tt>=lo&&tt<=hi){if(H.temperature_2m[i]!=null)temps.push(H.temperature_2m[i]);pr+=H.precipitation[i]||0;wind=Math.max(wind,H.wind_speed_10m[i]||0);}}};
+    pick(t0-36e5,t1+36e5); if(!temps.length)pick(-Infinity,Infinity);
+    const tmin=Math.min(...temps),tmax=Math.max(...temps),tavg=temps.reduce((s,x)=>s+x,0)/temps.length;
+    const T=v=>IMP()?Math.round(v*9/5+32)+"°F":Math.round(v)+"°C";
+    const rain=IMP()?(pr/25.4).toFixed(2)+'"':pr.toFixed(1)+" mm";
+    const desc=pr<0.2?"dry":pr<4?"a little rain":"wet";
+    out.textContent=`☁ ${T(tavg)} avg (${T(tmin)}–${T(tmax)}), ${rain} rain — ${desc}. Wind to ${Math.round(IMP()?wind*KM2MI:wind)} ${IMP()?"mph":"km/h"}. Source: Open-Meteo.`;
+  }catch(e){out.textContent="☁ weather unavailable: "+e.message;}
+  btn.disabled=false;
+}
+$("wxBtn").addEventListener("click",weather);
+
+// ---- rally roadbook pace-notes (from geometry; works without map-matching) ----
+function roadbook(){
+  const {pos,a,b}=slice(); if(pos.length<3)return;
+  let cum=0,prevB=null,acc=0,accStart=0; const notes=[];
+  const word=d=>d>=150?"HAIRPIN ":d>=100?"tight   ":d>=70?"sharp   ":d>=50?"medium  ":"open    ";
+  const emit=(v,startKm)=>{const deg=Math.abs(v); if(deg<35)return; notes.push(`${startKm.toFixed(1).padStart(7)} km   ${v>0?"R":"L"}  ${word(deg)} ${Math.round(deg)}°`);};
+  for(let i=1;i<pos.length;i++){
+    const dt=pos[i][0]-pos[i-1][0],dk=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
+    if(dt<GAP)cum+=dk;
+    if(dt>=GAP||dk<0.015){if(acc!==0){emit(acc,accStart);acc=0;}prevB=null;continue;}
+    const b2=bearing(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
+    if(prevB!=null){let d=((b2-prevB+540)%360)-180; if(Math.abs(d)<100){if(acc!==0&&Math.sign(d)!==Math.sign(acc)){emit(acc,accStart);acc=0;} if(acc===0)accStart=cum; acc+=d;}}
+    prevB=b2;
+  }
+  if(acc!==0)emit(acc,accStart);
+  const head=`TIMELINE ROADBOOK — pace notes\n${a}${a!==b?" to "+b:""}\n${notes.length} corners over ${cum.toFixed(1)} km\ndist-from-start · direction · severity · turn-angle\n${"".padEnd(42,"-")}\n`;
+  save(`roadbook-${a}${a!==b?"_"+b:""}.txt`,head+notes.join("\n")+"\n","text/plain");
+  $("bestOut").hidden=false; $("bestOut").textContent=`📖 Roadbook: ${notes.length} corners over ${cum.toFixed(1)} km — downloaded.`;
+}
+$("exRoad").addEventListener("click",roadbook);
+
+// ---- flythrough clip (canvas draw-on → WebM via MediaRecorder) ----
+function fitProject(pos,W,H,pad){
+  let minLa=90,maxLa=-90,minLo=180,maxLo=-180;
+  for(const p of pos){minLa=Math.min(minLa,p[2]);maxLa=Math.max(maxLa,p[2]);minLo=Math.min(minLo,p[3]);maxLo=Math.max(maxLo,p[3]);}
+  const y=la=>{const s=Math.sin(la*Math.PI/180);return 0.5-Math.log((1+s)/(1-s))/(4*Math.PI);};
+  const x=lo=>(lo+180)/360;
+  const x0=x(minLo),x1=x(maxLo),y0=y(maxLa),y1=y(minLa),s=Math.min((W-2*pad)/((x1-x0)||1e-9),(H-2*pad)/((y1-y0)||1e-9));
+  const ox=pad+((W-2*pad)-(x1-x0)*s)/2, oy=pad+((H-2*pad)-(y1-y0)*s)/2;
+  return {X:lo=>ox+(x(lo)-x0)*s, Y:la=>oy+(y(la)-y0)*s};
+}
+async function flythrough(){
+  const {pos,a,b}=slice(); const btn=$("exFly"),old=btn.textContent;
+  if(pos.length<3)return;
+  if(typeof MediaRecorder==="undefined"){btn.textContent="No recorder support";setTimeout(()=>btn.textContent=old,2500);return;}
+  const W=1280,H=720,pad=70,P=tcfg().card,pr=fitProject(pos,W,H,pad);
+  const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
+  const bucket=k=>k<30?"c0":k<60?"c1":k<90?"c2":"c3";
+  const cond=(w,s)=>`${w} ${Math.round(s)}px 'Saira Condensed','Archivo',sans-serif`, mono=s=>`600 ${Math.round(s)}px 'IBM Plex Mono',monospace`;
+  try{await document.fonts.ready}catch(e){}
+  const cum=[0]; for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0];cum[i]=cum[i-1]+(dt<GAP?hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]):0);}
+  let rec,parts=[];
+  try{const stream=cv.captureStream(30);
+    const mime=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")?"video/webm;codecs=vp9":"video/webm";
+    rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6e6});
+  }catch(e){btn.textContent="Recorder failed";setTimeout(()=>btn.textContent=old,2500);return;}
+  rec.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
+  const done=new Promise(res=>rec.onstop=res); rec.start();
+  const DUR=Math.min(16000,Math.max(8000,pos.length*6)), t0=performance.now();
+  btn.textContent="Recording…"; btn.disabled=true;
+  function frame(){
+    const p=Math.min(1,(performance.now()-t0)/DUR), upto=Math.max(1,Math.floor(p*(pos.length-1)));
+    ctx.fillStyle=P.bg;ctx.fillRect(0,0,W,H); if(curTheme()==="dash")drawCarbon(ctx,W,H);
+    ctx.lineWidth=4;ctx.lineJoin="round";ctx.lineCap="round";
+    for(let i=1;i<=upto;i++){const A=pos[i-1],B2=pos[i],dt=B2[0]-A[0];if(dt<=0||dt>GAP)continue;
+      let kmh=(B2[4]||A[4]||0)*3.6; if(!kmh)kmh=hav(A[2],A[3],B2[2],B2[3])/(dt/36e5);
+      ctx.strokeStyle=tcfg().speed[bucket(kmh)];ctx.beginPath();ctx.moveTo(pr.X(A[3]),pr.Y(A[2]));ctx.lineTo(pr.X(B2[3]),pr.Y(B2[2]));ctx.stroke();}
+    const hd=pos[upto]; ctx.fillStyle=P.accent;ctx.beginPath();ctx.arc(pr.X(hd[3]),pr.Y(hd[2]),8,0,7);ctx.fill();
+    ctx.textBaseline="top";ctx.textAlign="left";ctx.fillStyle=P.accent;ctx.font=mono(15);ctx.fillText("TIMELINE ROADBOOK",pad,26);
+    const rn=(($("riderName")&&$("riderName").value)||"").trim(); if(rn){ctx.textAlign="right";ctx.fillStyle=P.fg;ctx.fillText(rn.toUpperCase(),W-pad,26);ctx.textAlign="left";}
+    const spd=(hd[4]||0)*3.6; ctx.fillStyle=P.fg;ctx.font=cond(800,42);
+    ctx.fillText(`${(IMP()?cum[upto]*KM2MI:cum[upto]).toFixed(1)} ${IMP()?"mi":"km"}`,pad,H-64);
+    ctx.textAlign="right";ctx.fillText(`${Math.round(IMP()?spd*KM2MI:spd)} ${IMP()?"mph":"km/h"}`,W-pad,H-64);ctx.textAlign="left";
+    if(p<1)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},250);
+  }
+  requestAnimationFrame(frame);
+  await done;
+  saveBlob(`ride-${a}${a!==b?"_"+b:""}-flythrough.webm`,new Blob(parts,{type:"video/webm"}));
+  btn.textContent=old; btn.disabled=false;
+}
+$("exFly").addEventListener("click",flythrough);
+
+// ---- refresh hook: keep stops/tour/duel current, reset transient outputs ----
+function updateExtras(pos){
+  const s=slice();
+  renderStops(s.segs);
+  renderTour(pos,s.a,s.b);
+  $("wxOut").hidden=true; $("bestOut").hidden=true;
+  if(bestLayer)bestLayer.clearLayers();
+  if(RIDERS.length)renderDuel();
+}
+
+// ---- IndexedDB cache: restore last import instantly (local only) ----
+const CACHE={
+  db(){return new Promise((res,rej)=>{try{const q=indexedDB.open("tx_cache",1);
+    q.onupgradeneeded=()=>q.result.createObjectStore("f");q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}catch(e){rej(e);}});},
+  async put(o){try{const db=await this.db();await new Promise((res,rej)=>{const t=db.transaction("f","readwrite");t.objectStore("f").put(o,"last");t.oncomplete=res;t.onerror=()=>rej(t.error);});}catch(e){}},
+  async get(){try{const db=await this.db();return await new Promise(res=>{const t=db.transaction("f","readonly"),r=t.objectStore("f").get("last");r.onsuccess=()=>res(r.result||null);r.onerror=()=>res(null);});}catch(e){return null;}},
+  async clear(){try{const db=await this.db();await new Promise(res=>{const t=db.transaction("f","readwrite");t.objectStore("f").delete("last");t.oncomplete=res;t.onerror=res;});}catch(e){}}
+};
+function cacheCurrent(name){try{CACHE.put({name,savedAt:Date.now(),data:DATA});}catch(e){}}
+(async()=>{
+  const c=await CACHE.get(); if(!c||!c.data)return;
+  const btn=$("restoreBtn"); if(!btn)return;
+  const when=new Date(c.savedAt).toLocaleDateString();
+  btn.hidden=false; btn.innerHTML=`↻ Restore last import <span class="fmt">${esc(c.name)} · ${when}</span>`;
+  btn.addEventListener("click",()=>{DATA=c.data;DATA.semanticSegments=DATA.semanticSegments||[];DATA.rawSignals=DATA.rawSignals||[];index();
+    drop.classList.add("loaded");drop.querySelector(".big").textContent="Restored "+c.name;drop.querySelector(".small").textContent="from your last session";btn.hidden=true;clr.hidden=true;});
+  const clr=document.createElement("button"); clr.className="export"; clr.style.marginTop="6px"; clr.textContent="✕ clear cached import";
+  clr.addEventListener("click",async()=>{await CACHE.clear();btn.hidden=true;clr.hidden=true;});
+  btn.after(clr);
+})();
 
 applyTheme(curTheme());
 setUnits(UNIT);
