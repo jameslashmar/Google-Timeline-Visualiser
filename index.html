@@ -1238,14 +1238,14 @@ async function matchRoads(){
             let jj=0; const sg=[];
             for(const v of g){
               while(jj<chunk.length-1 && hav(v[0],v[1],chunk[jj+1][2],chunk[jj+1][3])<hav(v[0],v[1],chunk[jj][2],chunk[jj][3])) jj++;
-              sg.push([v[0],v[1],chunk[jj][4]||0]);
+              sg.push([v[0],v[1],chunk[jj][4]||0,(chunk[jj][1]||"").slice(0,10)]);   // carry the real day
             }
             speedShapes.push(sg); matchedChunk=true;
           }
         }
         // a chunk that wouldn't match (tunnels, off-road, GPS drift) → keep the raw geometry so the
         // drawn line stays continuous (it just isn't counted in the matched stats)
-        if(!matchedChunk) speedShapes.push(chunk.map(p=>[p[2],p[3],p[4]||0]));
+        if(!matchedChunk) speedShapes.push(chunk.map(p=>[p[2],p[3],p[4]||0,(p[1]||"").slice(0,10)]));
         done+=chunk.length;
         await new Promise(res=>setTimeout(res,400)); // be polite to the public server
       }
@@ -1271,7 +1271,7 @@ async function matchRoads(){
       // connect consecutive shapes (chunk boundaries / small unmatched bits) so the line stays
       // continuous; only insert a real >GAP break when they're far apart (a genuine stop/failed leg)
       if(prevV){ t += (hav(prevV[0],prevV[1],sg[0][0],sg[0][1])>8) ? GAP+2000 : 1000; }
-      for(const v of sg){ mpos.push([t,new Date(t).toISOString(),v[0],v[1],v[2],null,"matched"]); t+=1000; }
+      for(const v of sg){ mpos.push([t,new Date(t).toISOString(),v[0],v[1],v[2],null,"matched",v[3]]); t+=1000; }
       prevV=sg[sg.length-1];
     }
     MATCHED={a,b,pos:mpos};
@@ -1979,6 +1979,32 @@ async function weather(){
 }
 // auto-fetch weather when the selection settles (debounced)
 function autoWeather(){ clearTimeout(wxTimer); wxTimer=setTimeout(()=>{ if(DATA&&slice().pos.length)weather(); }, 500); }
+// per-day weather (one API call, bucketed by day) for the flythrough of a multi-day range → {day:{line}}
+async function fetchDailyWeather(a,b,lat,lon){
+  const days=[]; for(let d=Date.parse(a);d<=Date.parse(b);d+=864e5)days.push(new Date(d).toISOString().slice(0,10));
+  if(days.length<2||days.length>16)return null;
+  const ageDays=(Date.now()-Date.parse(b+"T12:00"))/864e5;
+  const eps=[]; if(ageDays<=92)eps.push("forecast"); if(ageDays>=3)eps.push("archive"); if(!eps.length)eps.push("forecast");
+  const q=`latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&start_date=${a}&end_date=${b}&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code&timezone=auto`;
+  let H=null;
+  for(const ep of eps){ const r=await fetch(`https://${ep==="archive"?"archive-api":"api"}.open-meteo.com/v1/${ep}?${q}`);
+    if(!r.ok)continue; const j=await r.json(); if(j&&j.hourly&&j.hourly.time&&j.hourly.temperature_2m.some(v=>v!=null)){H=j.hourly;break;} }
+  if(!H)return null;
+  const wimp=wxUnit==="imp", T=v=>wimp?Math.round(v*9/5+32)+"°F":Math.round(v)+"°C", map={};
+  for(const day of days){
+    let temps=[],pr=0,codes={};
+    for(let i=0;i<H.time.length;i++){ if(H.time[i].slice(0,10)!==day)continue;
+      if(H.temperature_2m[i]!=null)temps.push(H.temperature_2m[i]); pr+=H.precipitation[i]||0;
+      const c=H.weather_code[i]; if(c!=null)codes[c]=(codes[c]||0)+1; }
+    if(!temps.length)continue;
+    const tavg=temps.reduce((s,x)=>s+x,0)/temps.length;
+    const code=+Object.keys(codes).sort((x,y)=>codes[y]-codes[x]||y-x)[0]||0, [icon,desc]=wmo(code);
+    const rain=pr<0.1?"dry":(wimp?(pr/25.4).toFixed(2)+'" rain':pr.toFixed(1)+" mm rain");
+    const dl=new Date(day+"T12:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}).toUpperCase();
+    map[day]={line:`${dl} · ${icon} ${desc.toUpperCase()} · ${T(tavg)} · ${rain}`};
+  }
+  return map;
+}
 
 // ---- rally roadbook pace-notes (from geometry; works without map-matching) ----
 function roadbook(){
@@ -2046,6 +2072,9 @@ async function flythrough(){
   btn.textContent="Matching roads…"; setBusy("Matching roads…");
   let src=rawpos; try{const M=await ensureMatched(); if(M&&M.pos.length>2)src=M.pos;}catch(e){}
   const pos=thinFly(src);
+  const dayOf=p=>p[7]||(p[1]&&String(p[1]).slice(0,10))||a;
+  let dayWx=null;   // per-day weather for multi-day rides → cross-faded as the head crosses days
+  if(a!==b){ setBusy("Fetching weather…"); try{const md=pos[Math.floor(pos.length/2)]; dayWx=await fetchDailyWeather(a,b,md[2],md[3]);}catch(e){} }
   const W=1920,H=1080,P=tcfg().card;
   btn.textContent="Rendering…"; setBusy("Rendering video…");
   try{await document.fonts.ready;}catch(e){}
@@ -2101,7 +2130,7 @@ async function flythrough(){
   const twV=$("sTwist").textContent, twK=$("sTwistK").textContent.toUpperCase();
   const rider=(($("riderName")&&$("riderName").value)||"").trim();
   const M=Math.round(W*0.03), px=W*0.70;
-  function overlay(frac,ri){
+  function overlay(frac,ri,wxLine,wxAlpha){
     const tg=ctx.createLinearGradient(0,0,0,H*0.24); tg.addColorStop(0,"rgba(0,0,0,.72)");tg.addColorStop(1,"rgba(0,0,0,0)");
     ctx.fillStyle=tg;ctx.fillRect(0,0,W,H*0.24);
     const rg=ctx.createLinearGradient(px,0,W,0); rg.addColorStop(0,"rgba(0,0,0,0)");rg.addColorStop(.4,"rgba(0,0,0,.72)");rg.addColorStop(1,"rgba(0,0,0,.85)");
@@ -2109,7 +2138,7 @@ async function flythrough(){
     ctx.textBaseline="top";ctx.textAlign="left";
     ctx.fillStyle=P.accent;ctx.font=mono(W*0.014);ctx.fillText("TIMELINE ROADBOOK",M,M);
     ctx.fillStyle="#fff";ctx.font=cond(800,W*0.033);ctx.fillText(a===b?dfmt(a):dfmt(a)+" — "+dfmt(b),M,M+W*0.024);
-    if(WX&&WX.a===a&&WX.b===b){ctx.fillStyle="rgba(255,255,255,.82)";ctx.font=mono(W*0.0135);ctx.fillText(WX.line,M,M+W*0.024+W*0.04);}
+    if(wxLine){ctx.save();ctx.globalAlpha=Math.max(0,Math.min(1,wxAlpha));ctx.fillStyle="rgba(255,255,255,.85)";ctx.font=mono(W*0.0135);ctx.fillText(wxLine,M,M+W*0.024+W*0.04);ctx.restore();}
     if(rider){ctx.textAlign="right";ctx.fillStyle="#fff";ctx.font=mono(W*0.014);ctx.fillText(rider.toUpperCase(),W-M,M);ctx.textAlign="left";}
     const sx=px+W*0.028, vFs=W*0.027, kFs=W*0.0115, twVfs=W*0.026;
     ctx.font=mono(kFs); const twMaxW=W-M-sx, twLines=[];   // wrap the twistiness subtitle to the panel
@@ -2146,6 +2175,7 @@ async function flythrough(){
   const RC=0.72, RV=2/(1+RC);
   const revealFrac=p=>{if(p<=RC)return RV*p;const u=p-RC;return RV*RC+RV*(u-u*u/(2*(1-RC)));};
   let camX=null,camY=null,snap=null; const SMOOTH=total>700?0.07:0.11;   // gentler follow-cam pan on longer routes
+  let shownDay=null,fadeStart=-1; const WXFADE=700;   // per-day weather cross-fade state
   function frame(){
     const el=performance.now()-t0; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
     if(el<DRAW+SETTLE){                       // draw + a brief settle held on the finished detail view
@@ -2183,7 +2213,19 @@ async function flythrough(){
     ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(h[0],h[1],(W*0.0035)/k,0,7);ctx.fill();
     ctx.restore();
     let ri=pos.length-1; for(let i=1;i<pos.length;i++){if(cum[i]>=reveal){ri=i;break;}}   // reveal index for count-up
-    overlay(frac,ri);
+    // weather line: single WX, or the current day's weather cross-faded as the head crosses days
+    let wxLine=(WX&&WX.a===a&&WX.b===b)?WX.line:null, wxAlpha=1;
+    if(dayWx){
+      const headDay=dayOf(pos[Math.min(ri,pos.length-1)]);
+      if(shownDay===null)shownDay=headDay;
+      else if(headDay!==shownDay&&fadeStart<0)fadeStart=el;
+      wxLine=(dayWx[shownDay]||{}).line||null;
+      if(fadeStart>=0){ const pp=(el-fadeStart)/WXFADE;
+        if(pp>=1){shownDay=headDay;fadeStart=-1;wxLine=(dayWx[shownDay]||{}).line||null;}
+        else if(pp<0.5)wxAlpha=1-pp*2;                       // fade the old day out
+        else {wxAlpha=(pp-0.5)*2; wxLine=(dayWx[headDay]||{}).line||null;} }   // fade the new day in
+    }
+    overlay(frac,ri,wxLine,wxAlpha);
     busyTxt.textContent="Rendering video… "+Math.min(99,Math.round(el/(DRAW+SETTLE+ZOUT+HOLD)*100))+"%";
     if(el<DRAW+SETTLE+ZOUT+HOLD)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},250);
   }
