@@ -884,21 +884,24 @@ async function renderCard(ctx, layout, W, H, pos, opts){
            [$("sClimb").textContent,$("kClimb").textContent],
            [$("sBends").textContent,"bends"]];
   const twVfs=W*(horiz?0.026:0.032);
-  const twFull=$("sTwistK").textContent.toUpperCase();
-  const twBi=twFull.indexOf(" · BEST");
-  const twLines=twBi>0?[twFull.slice(0,twBi),twFull.slice(twBi+3)]:[twFull];
   const twPad=Math.round(W*0.008);
+  const mapW=horiz?Math.round(W*0.58):0;
+  const twW=horiz?(W-(M+mapW+M)-M):(W-2*M);            // twistiness column width (known up front)
+  // word-wrap the (variable-length) twistiness subtitle to fit twW at the label font
+  ctx.font=mono(kFs);
+  const twFull=$("sTwistK").textContent.toUpperCase(), twLines=[];
+  {let line=""; for(const w of twFull.split(" ")){const t=line?line+" "+w:w;
+    if(ctx.measureText(t).width>twW&&line){twLines.push(line);line=w;}else line=t;} if(line)twLines.push(line);}
   const twH=twPad+twVfs*1.15+twLines.length*kFs*1.5;   // height of the twistiness banner body
-  let cells,twX,twY,twW,tr,proj=null;
+  let cells,twX,twY,tr,proj=null;
   if(horiz){
     // widescreen: big map on the left, metric column on the right spread to full height
-    const mapW=Math.round(W*0.58);
     tr={x:M,y:headH,w:mapW,h:H-headH-M};
-    const sx=M+mapW+M, sw=W-sx-M;
+    const sx=M+mapW+M;
     const colH=H-headH-M, preTw=Math.round(W*0.012);
     const stride=(colH-twH-preTw)/S.length;            // distribute 6 rows down the column
     cells=S.map((s2,i)=>({s:s2,x:sx,y:Math.round(headH+i*stride)}));
-    twX=sx;twY=Math.round(headH+S.length*stride+preTw);twW=sw;
+    twX=sx;twY=Math.round(headH+S.length*stride+preTw);
   }else{
     const cols=layout==="vertical"?2:3;
     const rowH=Math.round(labOff+kFs+W*0.03);
@@ -908,7 +911,7 @@ async function renderCard(ctx, layout, W, H, pos, opts){
     tr={x:M,y:headH,w:W-2*M,h:H-M-headH-mapStatsGap-bottomH};
     const cw=(W-2*M)/cols, gy=tr.y+tr.h+mapStatsGap;
     cells=S.map((s2,i)=>({s:s2,x:M+(i%cols)*cw,y:gy+Math.floor(i/cols)*rowH}));
-    twX=M;twY=gy+nRows*rowH+statsTwGap;twW=W-2*M;
+    twX=M;twY=gy+nRows*rowH+statsTwGap;
   }
   // ---- basemap tiles under the route (web-mercator) ----
   if(pos.length>1){
@@ -1502,30 +1505,38 @@ function computeRide(pos){
     else lastA=a;
   }
   let prevB=null,acc=0;
+  // per-~1km bins → "good bits" twistiness: self-weighted mean °/km (Σturn²/km ÷ Σturn),
+  // which reflects the character of the twisty roads and ignores straight transit.
+  let binKm=0,binTurn=0,sumTT=0,sumT=0;
+  const closeBin=()=>{ if(binKm>0.15&&binTurn>0){sumTT+=binTurn*binTurn/binKm;sumT+=binTurn;} binKm=0;binTurn=0; };
   for(let i=1;i<pos.length;i++){
     const dt=pos[i][0]-pos[i-1][0], dk=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
-    if(dt>=15*60*1000||dk<0.015){prevB=null;acc=0;continue;}
+    if(dt>=15*60*1000||dk<0.015){closeBin();prevB=null;acc=0;continue;}
+    binKm+=dk;
     const b=bearing(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
     if(prevB!=null){
       let d=((b-prevB+540)%360)-180;   // -180..180, +ve = right
       if(Math.abs(d)<100){
-        turnSum+=Math.abs(d);
+        turnSum+=Math.abs(d); binTurn+=Math.abs(d);
         if(acc!==0 && Math.sign(d)!==Math.sign(acc)) acc=0;
         acc+=d;
         if(acc>=40){bendR++;acc=0;} else if(acc<=-40){bendL++;acc=0;}
       }
     }
+    if(binKm>=1)closeBin();
     prevB=b;
   }
+  closeBin();
   return {km,moveMs,climb:alts.length>5?climb:null,max:vmax?vmax*3.6:null,
           bendL,bendR,bends:bendL+bendR,turnSum,
-          avg:(moveMs&&km)?km/(moveMs/36e5):null, twist:km>1?turnSum/km:null};
+          avg:(moveMs&&km)?km/(moveMs/36e5):null, twist:km>1?turnSum/km:null,
+          twistGood:(km>1&&sumT>0)?sumTT/sumT:null};
 }
 function fmtDur(ms){const h=Math.floor(ms/36e5),m=Math.round(ms%36e5/6e4);return ms?(h?h+"h ":"")+m+"m":"—";}
 function rideStats(pos,km){
   const r=computeRide(pos);
   $("sMove").textContent=fmtDur(r.moveMs);
-  STATS.avg=r.avg; STATS.climb=r.climb; STATS.twistBest=null; STATS.twist=r.twist;
+  STATS.avg=r.avg; STATS.climb=r.climb; STATS.twistBest=null; STATS.twist=r.twist; STATS.twistGood=r.twistGood;
   $("sBends").textContent=r.bends?`${r.bends} (${r.bendL}/${r.bendR})`:"—";
   if(r.twist==null){$("sTwist").textContent="—";$("sTwistK").textContent="twistiness";}
   renderStats();
@@ -1534,7 +1545,7 @@ function rideStats(pos,km){
 let UNIT="metric";try{UNIT=localStorage.getItem("tx_units")||"metric"}catch(e){}
 const IMP=()=>UNIT==="imp";
 const KM2MI=0.621371, M2FT=3.28084;
-const STATS={km:null,max:null,avg:null,climb:null,twist:null};
+const STATS={km:null,max:null,avg:null,climb:null,twist:null,twistGood:null};
 function renderStats(){
   $("sKm").textContent=STATS.km==null?"—":(IMP()?STATS.km*KM2MI:STATS.km).toFixed(1);
   $("kKm").textContent="distance ("+(IMP()?"mi":"km")+")";
@@ -1544,7 +1555,7 @@ function renderStats(){
   $("kAvg").textContent="avg moving "+(IMP()?"mph":"km/h");
   $("sClimb").textContent=STATS.climb==null?"—":Math.round(IMP()?STATS.climb*M2FT:STATS.climb).toLocaleString();
   $("kClimb").textContent="elevation gain ("+(IMP()?"ft":"m")+")";
-  if(STATS.twist!=null)twistShow(STATS.twist);
+  if(STATS.twist!=null||STATS.twistGood!=null)twistShow();
 }
 function setUnits(u){
   UNIT=u;try{localStorage.setItem("tx_units",u)}catch(e){}
@@ -1553,16 +1564,22 @@ function setUnits(u){
   if(DATA)drawProfile(slice().pos);
 }
 document.querySelectorAll(".unitsw button").forEach(b=>b.addEventListener("click",()=>setUnits(b.dataset.unit)));
-function twistShow(degKm){
+// Headline twistiness = the "good bits" metric (character of the twisty roads, ignoring
+// transit); the flat whole-route average is shown small alongside. Score = °/km ÷ 30.
+function twistShow(){
+  const head = STATS.twistGood!=null?STATS.twistGood:STATS.twist;
+  if(head==null){$("sTwist").textContent="—";$("sTwistK").textContent="twistiness";return;}
   const bands=[[15,"arrow straight"],[35,"open & flowing"],[70,"gently winding"],
                [120,"properly entertaining"],[200,"mountain grade"],
                [300,"relentless switchbacks"],[Infinity,"hairpin heaven"]];
-  const desc=bands.find(b=>degKm<b[0])[1];
-  const score=Math.min(10,degKm/35);
+  const desc=bands.find(b=>head<b[0])[1];
+  const score=Math.min(10,head/30);
   $("sTwist").textContent=score>=10?"10/10":score.toFixed(1)+"/10";
-  let k="twistiness · "+desc+" · "+(IMP()?Math.round(degKm/KM2MI)+"°/mi":Math.round(degKm)+"°/km");
+  const pk=v=>IMP()?Math.round(v/KM2MI)+"°/mi":Math.round(v)+"°/km";
+  let k="twistiness · "+desc+" · "+pk(head);
+  if(STATS.twist!=null&&STATS.twistGood!=null&&Math.abs(STATS.twist-head)>3) k+=" · "+pk(STATS.twist)+" avg";
   if(STATS.twistBest!=null){
-    const bs=Math.min(10,STATS.twistBest/35);
+    const bs=Math.min(10,STATS.twistBest/30);
     k+=" · best "+(IMP()?"6 mi":"10 km")+": "+(bs>=10?"10":bs.toFixed(1))+"/10";
   }
   $("sTwistK").textContent=k;
@@ -2001,7 +2018,6 @@ async function flythrough(){
            [$("sAvg").textContent,$("kAvg").textContent],[$("sMax").textContent,$("kMax").textContent],
            [$("sClimb").textContent,$("kClimb").textContent],[$("sBends").textContent,"bends"]];
   const twV=$("sTwist").textContent, twK=$("sTwistK").textContent.toUpperCase();
-  const twBi=twK.indexOf(" · BEST"), twLines=twBi>0?[twK.slice(0,twBi),twK.slice(twBi+3)]:[twK];
   const rider=(($("riderName")&&$("riderName").value)||"").trim();
   const M=Math.round(W*0.03), px=W*0.70;
   function overlay(){
@@ -2015,6 +2031,8 @@ async function flythrough(){
     if(WX&&WX.a===a&&WX.b===b){ctx.fillStyle="rgba(255,255,255,.82)";ctx.font=mono(W*0.0135);ctx.fillText(WX.line,M,M+W*0.024+W*0.04);}
     if(rider){ctx.textAlign="right";ctx.fillStyle="#fff";ctx.font=mono(W*0.014);ctx.fillText(rider.toUpperCase(),W-M,M);ctx.textAlign="left";}
     const sx=px+W*0.028, vFs=W*0.027, kFs=W*0.0115, twVfs=W*0.026;
+    ctx.font=mono(kFs); const twMaxW=W-M-sx, twLines=[];   // wrap the twistiness subtitle to the panel
+    {let line="";for(const w of twK.split(" ")){const t=line?line+" "+w:w;if(ctx.measureText(t).width>twMaxW&&line){twLines.push(line);line=w;}else line=t;}if(line)twLines.push(line);}
     const twBlock=W*0.012+twVfs*1.15+twLines.length*kFs*1.5;
     const stride=(H-2*M-twBlock)/S.length;
     S.forEach((s,i)=>{const y=M+i*stride; ctx.fillStyle="#fff";ctx.font=cond(800,vFs);ctx.fillText(s[0],sx,y);
