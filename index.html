@@ -1956,7 +1956,11 @@ async function flythrough(){
   const lat2y=la=>{const s=Math.sin(la*Math.PI/180);return 0.5-Math.log((1+s)/(1-s))/(4*Math.PI);};
   const lon2x=lo=>(lo+180)/360;
   let zf=3; for(;zf<17;zf++){const px=(lon2x(maxLo)-lon2x(minLo))*256*2**(zf+1),py=(lat2y(minLa)-lat2y(maxLa))*256*2**(zf+1); if(px>W||py>H)break;}
-  zf=Math.max(3,Math.min(zf,15)); const z=Math.min(16,zf+1), scale=2**z*256;   // +1 = 2× detail
+  zf=Math.max(3,Math.min(zf,15));
+  // detail base zoom: go 2 deeper than fit for a sharp close-up, unless that's too many tiles
+  const tileCount=zz=>{const s=2**zz*256;return (Math.floor(lon2x(maxLo)*s/256)-Math.floor(lon2x(minLo)*s/256)+3)*(Math.floor(lat2y(minLa)*s/256)-Math.floor(lat2y(maxLa)*s/256)+3);};
+  let z=Math.min(16,zf+2); if(tileCount(z)>600)z=Math.min(16,zf+1); if(tileCount(z)>600)z=zf;
+  const scale=2**z*256;
   const wx0=lon2x(minLo)*scale, wx1=lon2x(maxLo)*scale, wy0=lat2y(maxLa)*scale, wy1=lat2y(minLa)*scale;
   const worldW=wx1-wx0||1, worldH=wy1-wy0||1, bcx=(wx0+wx1)/2, bcy=(wy0+wy1)/2;
   // fetch tiles across the bbox (+1 tile margin)
@@ -1975,8 +1979,8 @@ async function flythrough(){
   const total=cum[cum.length-1]||1;
   const headWorld=r=>{for(let i=1;i<pos.length;i++){if(cum[i]>=r){const f=(r-cum[i-1])/((cum[i]-cum[i-1])||1);
     return [WPT[i-1][0]+(WPT[i][0]-WPT[i-1][0])*f, WPT[i-1][1]+(WPT[i][1]-WPT[i-1][1])*f];}} return WPT[WPT.length-1];};
-  // camera scales: overview fits the bbox; detail zooms ~2.4× but never upscales tiles much
-  const kOver=Math.min(W/worldW,H/worldH)*0.92, kDetail=Math.min(kOver*2.8,1.1);
+  // camera scales: overview fits the bbox; detail is a close follow, capped to avoid over-upscaling tiles
+  const kOver=Math.min(W/worldW,H/worldH)*0.92, kDetail=Math.min(kOver*4.5,1.35);
   const kEnd=Math.min((W*0.64)/worldW,(H*0.84)/worldH);   // final overview fits the clear area left of the stat panel
   // ---- overlay content (full stat set, "as per the PNGs") ----
   const S=[[$("sKm").textContent,$("kKm").textContent],[$("sMove").textContent,"moving time"],
@@ -2016,24 +2020,33 @@ async function flythrough(){
   try{const stream=cv.captureStream(30); rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8e6});
   }catch(e){btn.textContent="Recorder failed";setTimeout(()=>btn.textContent=old,2500);btn.disabled=false;return;}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
-  const done=new Promise(res=>rec.onstop=res); rec.start();
-  const DRAW=13000, ZOUT=2200, HOLD=900, t0=performance.now();
+  const done=new Promise(res=>rec.onstop=res); rec.start(1000);   // timeslice so the tail isn't dropped
+  const DRAW=12000, SETTLE=500, ZOUT=3000, HOLD=1700, t0=performance.now();
   btn.textContent="Recording…";
   const easeIO=e=>e<.5?2*e*e:1-((-2*e+2)**2)/2;
+  let camX=null,camY=null,snap=null; const SMOOTH=0.11;   // exponential follow-cam damping
   function frame(){
     const el=performance.now()-t0; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
-    if(el<DRAW){ frac=el/DRAW; const h=headWorld(frac*total); k=kDetail; cwx=h[0]; cwy=h[1];
-      const hw=W/(2*k),hh=H/(2*k);      // keep the detail window on fetched tiles
+    if(el<DRAW+SETTLE){                       // draw + a brief settle held on the finished detail view
+      frac=Math.min(1,el/DRAW);
+      const h=headWorld(frac*total);
+      if(camX==null){camX=h[0];camY=h[1];}
+      camX+=(h[0]-camX)*SMOOTH; camY+=(h[1]-camY)*SMOOTH;   // smooth the movement
+      k=kDetail; cwx=camX; cwy=camY;
+      const hw=W/(2*k),hh=H/(2*k);            // keep the detail window on fetched tiles
       cwx = worldW/2>hw ? Math.min(Math.max(cwx,wx0+hw),wx1-hw) : bcx;
       cwy = worldH/2>hh ? Math.min(Math.max(cwy,wy0+hh),wy1-hh) : bcy;
-    } else { frac=1; const e=Math.min(1,(el-DRAW)/ZOUT), t=easeIO(e), h=headWorld(total);
-      k=kDetail+(kEnd-kDetail)*t; cwx=h[0]+(bcx-h[0])*t; cwy=h[1]+(bcy-h[1])*t;
-      scx=W/2+(W*0.34-W/2)*t; scy=H/2+(H*0.52-H/2)*t; }   // bias overview into the clear left area
+      camX=cwx; camY=cwy;
+      snap={x:cwx,y:cwy,k:k,scx:W/2,scy:H/2};  // remember the exact camera state at the transition
+    } else { frac=1; const e=Math.min(1,(el-DRAW-SETTLE)/ZOUT), t=easeIO(e);  // ease-in-out zoom-out FROM snap (no jump)
+      k=snap.k+(kEnd-snap.k)*t; cwx=snap.x+(bcx-snap.x)*t; cwy=snap.y+(bcy-snap.y)*t;
+      scx=snap.scx+(W*0.34-snap.scx)*t; scy=snap.scy+(H*0.52-snap.scy)*t; }
     ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle=P.bg;ctx.fillRect(0,0,W,H);
     ctx.save();
     ctx.setTransform(k,0,0,k, scx-cwx*k, scy-cwy*k);
-    for(const t of tiles) ctx.drawImage(t.im,t.x,t.y,257,257);
+    const vx0=cwx-scx/k,vx1=cwx+(W-scx)/k,vy0=cwy-scy/k,vy1=cwy+(H-scy)/k;   // cull tiles outside the camera
+    for(const t of tiles){ if(t.x+257<vx0||t.x>vx1||t.y+257<vy0||t.y>vy1)continue; ctx.drawImage(t.im,t.x,t.y,257,257); }
     ctx.lineWidth=(W*0.0034)/k; ctx.lineJoin="round"; ctx.lineCap="round";
     const reveal=frac*total;
     for(let i=1;i<pos.length;i++){ const dt=pos[i][0]-pos[i-1][0]; if(dt<=0||dt>GAP)continue; if(cum[i-1]>=reveal)break;
@@ -2049,7 +2062,7 @@ async function flythrough(){
     ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(h[0],h[1],(W*0.0035)/k,0,7);ctx.fill();
     ctx.restore();
     overlay();
-    if(el<DRAW+ZOUT+HOLD)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},150);
+    if(el<DRAW+SETTLE+ZOUT+HOLD)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},250);
   }
   requestAnimationFrame(frame);
   await done;
