@@ -2055,7 +2055,7 @@ async function ensureMatched(){
   const {a,b,pos}=slice();
   if(MATCHED&&MATCHED.a===a&&MATCHED.b===b&&MATCHED.pos.length>2)return MATCHED;
   const moving=pos.filter(p=>p[6]==="timelinePath"||p[4]>1.5).length;
-  if(moving<3||moving>4500)return null;   // too big → skip (hundreds of Valhalla requests / rate-limited)
+  if(moving<3||moving>6800)return null;   // too big → skip (hundreds of Valhalla requests / rate-limited)
   await matchRoads();
   return (MATCHED&&MATCHED.a===a&&MATCHED.b===b)?MATCHED:null;
 }
@@ -2108,7 +2108,12 @@ async function flythrough(){
   await Promise.all(jobs);
   // ---- route in world px + cumulative distance (constant-speed reveal) ----
   const WPT=pos.map(p=>[lon2x(p[3])*scale,lat2y(p[2])*scale]);
-  const cum=[0]; for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0];cum[i]=cum[i-1]+(dt<=0||dt>GAP?0:hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]));}
+  // a segment only "breaks" the line if it's a long time gap AND the bike actually moved far
+  // (a lunch/fuel stop in one spot shouldn't leave a hole) — fixes gaps on raw multi-day rides
+  const brk=[false],segd=[0];
+  for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0];const dk=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]);
+    segd[i]=dk; brk[i]=(dt<=0)||(dt>GAP&&dk>2);}
+  const cum=[0]; for(let i=1;i<pos.length;i++)cum[i]=cum[i-1]+(brk[i]?0:segd[i]);
   const total=cum[cum.length-1]||1;
   const headWorld=r=>{for(let i=1;i<pos.length;i++){if(cum[i]>=r){const f=(r-cum[i-1])/((cum[i]-cum[i-1])||1);
     return [WPT[i-1][0]+(WPT[i][0]-WPT[i-1][0])*f, WPT[i-1][1]+(WPT[i][1]-WPT[i-1][1])*f];}} return WPT[WPT.length-1];};
@@ -2200,8 +2205,8 @@ async function flythrough(){
     for(const t of tiles){ if(t.x+257<vx0||t.x>vx1||t.y+257<vy0||t.y>vy1)continue; ctx.drawImage(t.im,t.x,t.y,257,257); }
     ctx.lineWidth=(W*0.0034)/k; ctx.lineJoin="round"; ctx.lineCap="round";
     const reveal=frac*total;
-    for(let i=1;i<pos.length;i++){ const dt=pos[i][0]-pos[i-1][0]; if(dt<=0||dt>GAP)continue; if(cum[i-1]>=reveal)break;
-      let kmh=(pos[i][4]||pos[i-1][4]||0)*3.6; if(!kmh)kmh=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3])/(dt/36e5);
+    for(let i=1;i<pos.length;i++){ if(brk[i])continue; if(cum[i-1]>=reveal)break;
+      let kmh=(pos[i][4]||pos[i-1][4]||0)*3.6; if(!kmh)kmh=segd[i]/((pos[i][0]-pos[i-1][0])/36e5);
       ctx.strokeStyle=tcfg().speed[bucket(kmh)];
       const A=WPT[i-1]; let bx=WPT[i][0],by=WPT[i][1];
       if(cum[i]>reveal){const f=(reveal-cum[i-1])/((cum[i]-cum[i-1])||1);bx=A[0]+(bx-A[0])*f;by=A[1]+(by-A[1])*f;
