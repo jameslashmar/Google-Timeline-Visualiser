@@ -1954,10 +1954,13 @@ async function weather(){
   // single-day focus: clamp a long/whole-history range to the last ridden day
   let sd=a, ed=b, note="";
   if(Date.parse(ed)-Date.parse(sd) > 16*864e5){ sd=ed; note=" (last day)"; }
+  // use the shown day(s)' own fixes for location + riding-hours window (not the whole-trip midpoint/24h)
+  const dfx=pos.filter(p=>{const d=(p[1]||"").slice(0,10);return d>=sd&&d<=ed;}), use=dfx.length?dfx:pos;
+  const mid2=use[Math.floor(use.length/2)], t0=use[0][0], t1=use[use.length-1][0];
   // pick endpoint by age: forecast API covers recent past+future; archive lags a few days
   const ageDays=(Date.now()-Date.parse(ed+"T12:00"))/864e5;
   const eps=[]; if(ageDays<=92)eps.push("forecast"); if(ageDays>=3)eps.push("archive"); if(!eps.length)eps.push("forecast");
-  const q=`latitude=${mid[2].toFixed(3)}&longitude=${mid[3].toFixed(3)}&start_date=${sd}&end_date=${ed}&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code&timezone=auto`;
+  const q=`latitude=${mid2[2].toFixed(3)}&longitude=${mid2[3].toFixed(3)}&start_date=${sd}&end_date=${ed}&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code&timezone=auto`;
   try{
     let H=null;
     for(const ep of eps){
@@ -1967,11 +1970,11 @@ async function weather(){
     }
     if(tok!==wxToken)return;   // selection changed mid-fetch → drop this result
     if(!H)throw new Error("no data for those dates");
-    const t0=pos[0][0],t1=pos[pos.length-1][0]; let temps=[],pr=0,wind=0,codes={};
+    let temps=[],pr=0,wind=0,codes={};
     const pick=(lo,hi)=>{temps=[];pr=0;wind=0;codes={};for(let i=0;i<H.time.length;i++){const tt=Date.parse(H.time[i]);
       if(tt>=lo&&tt<=hi){if(H.temperature_2m[i]!=null)temps.push(H.temperature_2m[i]);pr+=H.precipitation[i]||0;
         wind=Math.max(wind,H.wind_speed_10m[i]||0);const c=H.weather_code[i];if(c!=null)codes[c]=(codes[c]||0)+1;}}};
-    pick(t0-36e5,t1+36e5); if(!temps.length)pick(-Infinity,Infinity);
+    pick(t0-18e5,t1+18e5); if(!temps.length)pick(-Infinity,Infinity);   // riding hours (±30 min), fall back to whole day
     if(!temps.length)throw new Error("no data for those dates");
     const tmin=Math.min(...temps),tmax=Math.max(...temps),tavg=temps.reduce((s,x)=>s+x,0)/temps.length;
     const code=+Object.keys(codes).sort((x,y)=>codes[y]-codes[x]||y-x)[0]||0;  // modal condition, ties→worse
@@ -1987,29 +1990,36 @@ async function weather(){
 }
 // auto-fetch weather when the selection settles (debounced)
 function autoWeather(){ clearTimeout(wxTimer); wxTimer=setTimeout(()=>{ if(DATA&&slice().pos.length)weather(); }, 500); }
-// per-day weather (one API call, bucketed by day) for the flythrough of a multi-day range → {day:{line}}
-async function fetchDailyWeather(a,b,lat,lon){
-  const days=[]; for(let d=Date.parse(a);d<=Date.parse(b);d+=864e5)days.push(new Date(d).toISOString().slice(0,10));
+// per-day weather for the flythrough — each day at ITS OWN location over the actual RIDING
+// hours (not the trip midpoint / full 24h, which drags temps down & reads overcast) → {day:{line}}
+async function fetchDailyWeather(rawpos){
+  const byDay=new Map();
+  for(const p of rawpos){ const d=(p[1]||"").slice(0,10); if(!d)continue; if(!byDay.has(d))byDay.set(d,[]); byDay.get(d).push(p); }
+  const days=[...byDay.keys()].sort();
   if(days.length<2||days.length>16)return null;
-  const ageDays=(Date.now()-Date.parse(b+"T12:00"))/864e5;
-  const eps=[]; if(ageDays<=92)eps.push("forecast"); if(ageDays>=3)eps.push("archive"); if(!eps.length)eps.push("forecast");
-  const q=`latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&start_date=${a}&end_date=${b}&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code&timezone=auto`;
-  let H=null;
-  for(const ep of eps){ const r=await fetch(`https://${ep==="archive"?"archive-api":"api"}.open-meteo.com/v1/${ep}?${q}`);
-    if(!r.ok)continue; const j=await r.json(); if(j&&j.hourly&&j.hourly.time&&j.hourly.temperature_2m.some(v=>v!=null)){H=j.hourly;break;} }
-  if(!H)return null;
   const wimp=wxUnit==="imp", T=v=>wimp?Math.round(v*9/5+32)+"°F":Math.round(v)+"°C", map={};
   for(const day of days){
-    let temps=[],pr=0,codes={};
-    for(let i=0;i<H.time.length;i++){ if(H.time[i].slice(0,10)!==day)continue;
-      if(H.temperature_2m[i]!=null)temps.push(H.temperature_2m[i]); pr+=H.precipitation[i]||0;
-      const c=H.weather_code[i]; if(c!=null)codes[c]=(codes[c]||0)+1; }
+    const dp=byDay.get(day); if(dp.length<2)continue;
+    const mid=dp[Math.floor(dp.length/2)], t0=dp[0][0], t1=dp[dp.length-1][0];   // day's location + riding window
+    const ageDays=(Date.now()-Date.parse(day+"T12:00"))/864e5;
+    const eps=[]; if(ageDays<=92)eps.push("forecast"); if(ageDays>=3)eps.push("archive"); if(!eps.length)eps.push("forecast");
+    const q=`latitude=${mid[2].toFixed(3)}&longitude=${mid[3].toFixed(3)}&start_date=${day}&end_date=${day}&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code&timezone=auto`;
+    let H=null;
+    for(const ep of eps){ try{const r=await fetch(`https://${ep==="archive"?"archive-api":"api"}.open-meteo.com/v1/${ep}?${q}`);
+      if(!r.ok)continue; const j=await r.json(); if(j&&j.hourly&&j.hourly.time&&j.hourly.temperature_2m.some(v=>v!=null)){H=j.hourly;break;}}catch(e){} }
+    if(!H)continue;
+    let temps=[],pr=0,codes={},any=false;
+    const scan=(lo,hi)=>{temps=[];pr=0;codes={};any=false;for(let i=0;i<H.time.length;i++){const tt=Date.parse(H.time[i]);
+      if(tt<lo||tt>hi)continue;any=true; if(H.temperature_2m[i]!=null)temps.push(H.temperature_2m[i]); pr+=H.precipitation[i]||0;
+      const c=H.weather_code[i]; if(c!=null)codes[c]=(codes[c]||0)+1;}};
+    scan(t0-18e5,t1+18e5); if(!temps.length)scan(-Infinity,Infinity);   // riding hours; fall back to whole day
     if(!temps.length)continue;
     const tavg=temps.reduce((s,x)=>s+x,0)/temps.length;
     const code=+Object.keys(codes).sort((x,y)=>codes[y]-codes[x]||y-x)[0]||0, [icon,desc]=wmo(code);
     const rain=pr<0.1?"dry":(wimp?(pr/25.4).toFixed(2)+'" rain':pr.toFixed(1)+" mm rain");
     const dl=new Date(day+"T12:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}).toUpperCase();
     map[day]={line:`${dl} · ${icon} ${desc.toUpperCase()} · ${T(tavg)} · ${rain}`};
+    await new Promise(r=>setTimeout(r,120));   // gentle with N per-day calls
   }
   return map;
 }
@@ -2082,7 +2092,7 @@ async function flythrough(){
   const pos=thinFly(src);
   const dayOf=p=>p[7]||(p[1]&&String(p[1]).slice(0,10))||a;
   let dayWx=null;   // per-day weather for multi-day rides → cross-faded as the head crosses days
-  if(a!==b){ setBusy("Fetching weather…"); try{const md=pos[Math.floor(pos.length/2)]; dayWx=await fetchDailyWeather(a,b,md[2],md[3]);}catch(e){} }
+  if(a!==b){ setBusy("Fetching weather…"); try{ dayWx=await fetchDailyWeather(rawpos);}catch(e){} }
   const W=1920,H=1080,P=tcfg().card;
   btn.textContent="Rendering…"; setBusy("Rendering video…");
   try{await document.fonts.ready;}catch(e){}
