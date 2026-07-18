@@ -1942,28 +1942,114 @@ async function flythrough(){
   if(pos.length<3)return;
   const mime=pickVideoMime();
   if(!mime){btn.textContent="No recorder support";setTimeout(()=>btn.textContent=old,2500);return;}
-  const W=1920,H=1080;
+  const W=1920,H=1080,P=tcfg().card;
   btn.textContent="Rendering…"; btn.disabled=true;
-  // static background: the exact horizontal card, minus the animated line
-  const base=document.createElement("canvas");base.width=W;base.height=H;
-  const proj=await renderCard(base.getContext("2d"),"horizontal",W,H,pos,{track:false});
-  if(!proj){btn.textContent=old;btn.disabled=false;return;}
-  const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
+  try{await document.fonts.ready;}catch(e){}
+  const cond=(w,s)=>`${w} ${Math.round(s)}px 'Saira Condensed','Archivo',sans-serif`, mono=s=>`600 ${Math.round(s)}px 'IBM Plex Mono',monospace`;
+  const dfmt=d=>new Date(d+"T12:00").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+  const bucket=k=>k<30?"c0":k<60?"c1":k<90?"c2":"c3";
+  // ---- projection: fit route into the FULL frame, tiles one zoom deeper for sharp zoom ----
+  let minLa=90,maxLa=-90,minLo=180,maxLo=-180;
+  for(const p of pos){minLa=Math.min(minLa,p[2]);maxLa=Math.max(maxLa,p[2]);minLo=Math.min(minLo,p[3]);maxLo=Math.max(maxLo,p[3]);}
+  const padLa=(maxLa-minLa)*0.20||0.003,padLo=(maxLo-minLo)*0.20||0.003;
+  minLa-=padLa;maxLa+=padLa;minLo-=padLo;maxLo+=padLo;
+  const lat2y=la=>{const s=Math.sin(la*Math.PI/180);return 0.5-Math.log((1+s)/(1-s))/(4*Math.PI);};
+  const lon2x=lo=>(lo+180)/360;
+  let zf=3; for(;zf<17;zf++){const px=(lon2x(maxLo)-lon2x(minLo))*256*2**(zf+1),py=(lat2y(minLa)-lat2y(maxLa))*256*2**(zf+1); if(px>W||py>H)break;}
+  zf=Math.max(3,Math.min(zf,15)); const z=Math.min(16,zf+1), scale=2**z*256;   // +1 = 2× detail
+  const wx0=lon2x(minLo)*scale, wx1=lon2x(maxLo)*scale, wy0=lat2y(maxLa)*scale, wy1=lat2y(minLa)*scale;
+  const worldW=wx1-wx0||1, worldH=wy1-wy0||1, bcx=(wx0+wx1)/2, bcy=(wy0+wy1)/2;
+  // fetch tiles across the bbox (+1 tile margin)
+  const tiles=[],jobs=[]; const T=2**z;
+  for(let tx=Math.floor(wx0/256)-1;tx<=Math.floor(wx1/256)+1;tx++)
+    for(let ty=Math.floor(wy0/256)-1;ty<=Math.floor(wy1/256)+1;ty++){
+      if(ty<0||ty>=T)continue; const wtx=((tx%T)+T)%T;
+      const url=`https://a.basemaps.cartocdn.com/${P.tiles}/${z}/${wtx}/${ty}.png`;
+      jobs.push(new Promise(res=>{const im=new Image();im.crossOrigin="anonymous";
+        im.onload=()=>{tiles.push({im,x:tx*256,y:ty*256});res();};im.onerror=()=>res();im.src=url;}));
+    }
+  await Promise.all(jobs);
+  // ---- route in world px + cumulative distance (constant-speed reveal) ----
+  const WPT=pos.map(p=>[lon2x(p[3])*scale,lat2y(p[2])*scale]);
   const cum=[0]; for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0];cum[i]=cum[i-1]+(dt<=0||dt>GAP?0:hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3]));}
   const total=cum[cum.length-1]||1;
+  const headWorld=r=>{for(let i=1;i<pos.length;i++){if(cum[i]>=r){const f=(r-cum[i-1])/((cum[i]-cum[i-1])||1);
+    return [WPT[i-1][0]+(WPT[i][0]-WPT[i-1][0])*f, WPT[i-1][1]+(WPT[i][1]-WPT[i-1][1])*f];}} return WPT[WPT.length-1];};
+  // camera scales: overview fits the bbox; detail zooms ~2.4× but never upscales tiles much
+  const kOver=Math.min(W/worldW,H/worldH)*0.92, kDetail=Math.min(kOver*2.8,1.1);
+  const kEnd=Math.min((W*0.64)/worldW,(H*0.84)/worldH);   // final overview fits the clear area left of the stat panel
+  // ---- overlay content (full stat set, "as per the PNGs") ----
+  const S=[[$("sKm").textContent,$("kKm").textContent],[$("sMove").textContent,"moving time"],
+           [$("sAvg").textContent,$("kAvg").textContent],[$("sMax").textContent,$("kMax").textContent],
+           [$("sClimb").textContent,$("kClimb").textContent],[$("sBends").textContent,"bends"]];
+  const twV=$("sTwist").textContent, twK=$("sTwistK").textContent.toUpperCase();
+  const twBi=twK.indexOf(" · BEST"), twLines=twBi>0?[twK.slice(0,twBi),twK.slice(twBi+3)]:[twK];
+  const rider=(($("riderName")&&$("riderName").value)||"").trim();
+  const M=Math.round(W*0.03), px=W*0.70;
+  function overlay(){
+    const tg=ctx.createLinearGradient(0,0,0,H*0.24); tg.addColorStop(0,"rgba(0,0,0,.72)");tg.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=tg;ctx.fillRect(0,0,W,H*0.24);
+    const rg=ctx.createLinearGradient(px,0,W,0); rg.addColorStop(0,"rgba(0,0,0,0)");rg.addColorStop(.4,"rgba(0,0,0,.72)");rg.addColorStop(1,"rgba(0,0,0,.85)");
+    ctx.fillStyle=rg;ctx.fillRect(px,0,W-px,H);
+    ctx.textBaseline="top";ctx.textAlign="left";
+    ctx.fillStyle=P.accent;ctx.font=mono(W*0.014);ctx.fillText("TIMELINE ROADBOOK",M,M);
+    ctx.fillStyle="#fff";ctx.font=cond(800,W*0.033);ctx.fillText(a===b?dfmt(a):dfmt(a)+" — "+dfmt(b),M,M+W*0.024);
+    if(WX&&WX.a===a&&WX.b===b){ctx.fillStyle="rgba(255,255,255,.82)";ctx.font=mono(W*0.0135);ctx.fillText(WX.line,M,M+W*0.024+W*0.04);}
+    if(rider){ctx.textAlign="right";ctx.fillStyle="#fff";ctx.font=mono(W*0.014);ctx.fillText(rider.toUpperCase(),W-M,M);ctx.textAlign="left";}
+    const sx=px+W*0.028, vFs=W*0.027, kFs=W*0.0115, twVfs=W*0.026;
+    const twBlock=W*0.012+twVfs*1.15+twLines.length*kFs*1.5;
+    const stride=(H-2*M-twBlock)/S.length;
+    S.forEach((s,i)=>{const y=M+i*stride; ctx.fillStyle="#fff";ctx.font=cond(800,vFs);ctx.fillText(s[0],sx,y);
+      ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs);ctx.fillText(s[1].toUpperCase(),sx,y+vFs*1.12);});
+    const ty=M+S.length*stride;
+    ctx.strokeStyle="rgba(255,255,255,.25)";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(sx,ty);ctx.lineTo(W-M,ty);ctx.stroke();
+    ctx.fillStyle=P.accent;ctx.font=cond(800,twVfs);ctx.fillText(twV,sx,ty+W*0.008);
+    ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs); let ly=ty+W*0.008+twVfs*1.15;
+    for(const ln of twLines){ctx.fillText(ln,sx,ly);ly+=kFs*1.5;}
+    ctx.fillStyle="rgba(255,255,255,.5)";ctx.font=mono(W*0.009);ctx.textAlign="right";
+    ctx.fillText("© OPENSTREETMAP © CARTO",W-M,H-W*0.02);ctx.textAlign="left";
+  }
+  // ---- record ----
+  const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
+  ctx.imageSmoothingQuality="high";
   let rec,parts=[];
-  try{const stream=cv.captureStream(30);
-    rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:9e6});
+  try{const stream=cv.captureStream(30); rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8e6});
   }catch(e){btn.textContent="Recorder failed";setTimeout(()=>btn.textContent=old,2500);btn.disabled=false;return;}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
   const done=new Promise(res=>rec.onstop=res); rec.start();
-  const DRAW=13000, HOLD=1800, t0=performance.now();      // constant-speed draw, then hold on the finished card
+  const DRAW=13000, ZOUT=2200, HOLD=900, t0=performance.now();
   btn.textContent="Recording…";
+  const easeIO=e=>e<.5?2*e*e:1-((-2*e+2)**2)/2;
   function frame(){
-    const el=performance.now()-t0, frac=Math.min(1,el/DRAW);
-    ctx.drawImage(base,0,0);
-    drawCardTrack(ctx,proj,pos,cum,total,frac);
-    if(el<DRAW+HOLD)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},150);
+    const el=performance.now()-t0; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
+    if(el<DRAW){ frac=el/DRAW; const h=headWorld(frac*total); k=kDetail; cwx=h[0]; cwy=h[1];
+      const hw=W/(2*k),hh=H/(2*k);      // keep the detail window on fetched tiles
+      cwx = worldW/2>hw ? Math.min(Math.max(cwx,wx0+hw),wx1-hw) : bcx;
+      cwy = worldH/2>hh ? Math.min(Math.max(cwy,wy0+hh),wy1-hh) : bcy;
+    } else { frac=1; const e=Math.min(1,(el-DRAW)/ZOUT), t=easeIO(e), h=headWorld(total);
+      k=kDetail+(kEnd-kDetail)*t; cwx=h[0]+(bcx-h[0])*t; cwy=h[1]+(bcy-h[1])*t;
+      scx=W/2+(W*0.34-W/2)*t; scy=H/2+(H*0.52-H/2)*t; }   // bias overview into the clear left area
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle=P.bg;ctx.fillRect(0,0,W,H);
+    ctx.save();
+    ctx.setTransform(k,0,0,k, scx-cwx*k, scy-cwy*k);
+    for(const t of tiles) ctx.drawImage(t.im,t.x,t.y,257,257);
+    ctx.lineWidth=(W*0.0034)/k; ctx.lineJoin="round"; ctx.lineCap="round";
+    const reveal=frac*total;
+    for(let i=1;i<pos.length;i++){ const dt=pos[i][0]-pos[i-1][0]; if(dt<=0||dt>GAP)continue; if(cum[i-1]>=reveal)break;
+      let kmh=(pos[i][4]||pos[i-1][4]||0)*3.6; if(!kmh)kmh=hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3])/(dt/36e5);
+      ctx.strokeStyle=tcfg().speed[bucket(kmh)];
+      const A=WPT[i-1]; let bx=WPT[i][0],by=WPT[i][1];
+      if(cum[i]>reveal){const f=(reveal-cum[i-1])/((cum[i]-cum[i-1])||1);bx=A[0]+(bx-A[0])*f;by=A[1]+(by-A[1])*f;
+        ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(bx,by);ctx.stroke();break;}
+      ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(bx,by);ctx.stroke();
+    }
+    const h=headWorld(reveal);
+    ctx.fillStyle=P.accent;ctx.beginPath();ctx.arc(h[0],h[1],(W*0.009)/k,0,7);ctx.fill();
+    ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(h[0],h[1],(W*0.0035)/k,0,7);ctx.fill();
+    ctx.restore();
+    overlay();
+    if(el<DRAW+ZOUT+HOLD)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},150);
   }
   requestAnimationFrame(frame);
   await done;
