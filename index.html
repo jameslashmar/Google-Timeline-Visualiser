@@ -551,6 +551,7 @@
 <style id="addon">
   /* always-on component styles for the extra features — theme-neutral so they read on all three liveries */
   [hidden]{display:none!important}   /* component classes (.export/.note) set display and would otherwise beat the UA hidden rule */
+  #drop .small .fmtline{display:block;margin-top:4px;line-height:1.4}
   .panel{margin-top:12px;border:1px solid rgba(140,150,165,.28);border-radius:8px;background:rgba(140,150,165,.06);overflow:hidden;font-family:var(--sans,sans-serif)}
   .panel>summary{cursor:pointer;padding:9px 12px;font-weight:600;font-size:13px;list-style:none;display:flex;align-items:center;gap:8px}
   .panel>summary::-webkit-details-marker{display:none}
@@ -595,7 +596,11 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
         <h2>1 · Load Timeline.json</h2>
         <div id="drop" role="button" tabindex="0" aria-label="Load Timeline.json, GPX or CSV">
           <div class="big">Drop Timeline.json, GPX or CSV here</div>
-          <div class="small">or click to browse · <b>Timeline.json</b> Pixel: Settings → Location → Location Services → Timeline → Export · <b>.gpx</b> from an action cam / GPS logger (denser = truer bends) · <b>.csv</b> re-imports this tool's own export</div>
+          <div class="small">or click to browse
+            <span class="fmtline"><b>Timeline.json</b> — Android: Settings → Location → Location Services → Timeline → Export · iPhone: Google Maps → Your Timeline → ⚙ → Export</span>
+            <span class="fmtline"><b>.gpx</b> — from an action cam / GPS logger (denser = truer bends)</span>
+            <span class="fmtline"><b>.csv</b> — re-imports this tool's own export</span>
+          </div>
         </div>
         <input type="file" id="file" accept=".json,.gpx,.csv,application/json,application/gpx+xml,text/csv">
         <button class="export" id="restoreBtn" hidden style="margin-top:8px"></button>
