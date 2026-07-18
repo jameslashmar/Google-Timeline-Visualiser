@@ -1267,10 +1267,18 @@ async function matchRoads(){
     $("note").textContent="Distance, bends and twistiness are now road-matched (⌖): computed on the full OSM road geometry between your fixes via Valhalla. Bends = sustained direction changes ≥35°. Change the date range to reset to raw-GPS stats.";
     // store the matched track (with speed + gap markers) so the ride card / flythrough can use it
     const {a,b}=slice(); const mpos=[]; let t=0,prevV=null;
+    const nearestRaw=(la,lo)=>{let bi=0,bd=Infinity;for(let i=0;i<pos.length;i++){const d=hav(la,lo,pos[i][2],pos[i][3]);if(d<bd){bd=d;bi=i;}}return bi;};
     for(const sg of speedShapes){ if(!sg.length)continue;
-      // connect consecutive shapes (chunk boundaries / small unmatched bits) so the line stays
-      // continuous; only insert a real >GAP break when they're far apart (a genuine stop/failed leg)
-      if(prevV){ t += (hav(prevV[0],prevV[1],sg[0][0],sg[0][1])>8) ? GAP+2000 : 1000; }
+      if(prevV){
+        const gapKm=hav(prevV[0],prevV[1],sg[0][0],sg[0][1]);
+        if(gapKm>2 && gapKm<60){
+          // Valhalla only partially matched here — fill the hole with the raw fixes that cover it
+          const ia=nearestRaw(prevV[0],prevV[1]),ib=nearestRaw(sg[0][0],sg[0][1]),lo=Math.min(ia,ib),hi=Math.max(ia,ib);
+          for(let k=lo+1;k<hi;k++){mpos.push([t,new Date(t).toISOString(),pos[k][2],pos[k][3],pos[k][4]||0,null,"raw",(pos[k][1]||"").slice(0,10)]);t+=1000;}
+          t+=1000;
+        } else if(gapKm>=60){ t+=GAP+2000; }   // genuine break (ferry / data loss) — keep it a gap
+        else { t+=1000; }                        // adjacent shapes → just connect
+      }
       for(const v of sg){ mpos.push([t,new Date(t).toISOString(),v[0],v[1],v[2],null,"matched",v[3]]); t+=1000; }
       prevV=sg[sg.length-1];
     }
