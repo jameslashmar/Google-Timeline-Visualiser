@@ -4,6 +4,8 @@ A single-file, **fully client-side** web tool that turns a Google Timeline expor
 
 **→ Live: https://jameslashmar.github.io/Google-Timeline-Visualiser/**
 
+![Google Timeline Visualiser — a Porto→León ride sliced from a Timeline export: stats, speed-coloured map and elevation/speed profile](screenshot.png)
+
 Drop your `Timeline.json` (or a `.gpx` / `.csv`), pick a date range, and get:
 
 - Distance, moving time, average & max speed, elevation gain
