@@ -2024,11 +2024,15 @@ async function flythrough(){
   const DRAW=12000, SETTLE=500, ZOUT=3000, HOLD=1700, t0=performance.now();
   btn.textContent="Recording…";
   const easeIO=e=>e<.5?2*e*e:1-((-2*e+2)**2)/2;
+  // reveal velocity: constant for the first C of the draw, then ramps to 0 → the line
+  // glides to a stop before the zoom-out (no speed jump; area under the curve = 1)
+  const RC=0.72, RV=2/(1+RC);
+  const revealFrac=p=>{if(p<=RC)return RV*p;const u=p-RC;return RV*RC+RV*(u-u*u/(2*(1-RC)));};
   let camX=null,camY=null,snap=null; const SMOOTH=0.11;   // exponential follow-cam damping
   function frame(){
     const el=performance.now()-t0; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
     if(el<DRAW+SETTLE){                       // draw + a brief settle held on the finished detail view
-      frac=Math.min(1,el/DRAW);
+      frac=revealFrac(Math.min(1,el/DRAW));   // constant, then eases to a stop near the end
       const h=headWorld(frac*total);
       if(camX==null){camX=h[0];camY=h[1];}
       camX+=(h[0]-camX)*SMOOTH; camY+=(h[1]-camY)*SMOOTH;   // smooth the movement
