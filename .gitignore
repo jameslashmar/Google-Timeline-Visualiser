@@ -1,0 +1,17 @@
+# NEVER commit location data — Timeline.json is your entire location history
+Timeline*.json
+timeline*.json
+today.json
+
+# tool exports
+ride-*.png
+*-slice.json
+track*.gpx
+fixes*.csv
+
+# Google OAuth client secrets (only used when self-hosting; keep them local)
+client_secret*.json
+
+# macOS / editor cruft
+.DS_Store
+*.swp
