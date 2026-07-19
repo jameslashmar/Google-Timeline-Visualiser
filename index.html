@@ -551,6 +551,7 @@
 <style id="addon">
   /* always-on component styles for the extra features — theme-neutral so they read on all three liveries */
   [hidden]{display:none!important}   /* component classes (.export/.note) set display and would otherwise beat the UA hidden rule */
+  .ver{font-family:var(--mono,monospace);font-size:.32em;font-weight:600;opacity:.45;vertical-align:middle;letter-spacing:.02em}
   #drop .small .fmtline{display:block;margin-top:4px;line-height:1.4}
   /* auto weather bar above the map */
   #wxOut{display:flex;align-items:center;gap:10px;margin:2px 0 14px;padding:12px 16px;border-radius:10px;
@@ -605,7 +606,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
   </div>
   <header>
     <div class="eyebrow"><span id="eyebrowTxt">GOOGLE TIMELINE</span></div>
-    <h1>Timeline <span class="tick" id="tickWord">Roadbook</span></h1>
+    <h1>Timeline <span class="tick" id="tickWord">Roadbook</span> <span class="ver" id="verTag"></span></h1>
   </header>
   <p class="sub">Google now exports your entire Timeline as one giant on-device file. This slices out just the dates you want — <b>everything runs locally in your browser</b>, nothing is uploaded anywhere.</p>
 
@@ -743,6 +744,8 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
+const APP_VERSION="v1.0";   // bump on each deploy so you can confirm the live site is the latest
+if($("verTag"))$("verTag").textContent=APP_VERSION;
 const drop=$("drop"), file=$("file");
 
 drop.addEventListener("click",()=>file.click());
