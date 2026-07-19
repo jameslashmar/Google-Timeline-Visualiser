@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.2";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.3";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -2134,6 +2134,10 @@ async function flythrough(layout){
   const scale=2**z*256;
   const wx0=lon2x(minLo)*scale, wx1=lon2x(maxLo)*scale, wy0=lat2y(maxLa)*scale, wy1=lat2y(minLa)*scale;
   const worldW=wx1-wx0||1, worldH=wy1-wy0||1, bcx=(wx0+wx1)/2, bcy=(wy0+wy1)/2;
+  // camera scales & final overview crop (computed up-front so the overview-fill layer can be sized)
+  const kOver=Math.min(W/worldW,H/worldH)*0.92, kDetail=Math.min(kOver*(horiz?4.5:7.2),horiz?1.35:2.0);   // tighter follow on tall/square
+  const clr = horiz ? {w:0.66,h:0.86,sx:0.34,sy:0.52} : vert ? {w:1.02,h:0.62,sx:0.5,sy:0.35} : {w:1.0,h:0.72,sx:0.5,sy:0.42};
+  const kEnd=Math.min((W*clr.w)/worldW,(H*clr.h)/worldH);
   // fetch a NO-LABELS base map (place names are drawn as vector city labels instead — crisp + filterable)
   const tiles=[],jobs=[]; const T=2**z;
   const baseStyle=P.tiles.replace(/_all$/,"_nolabels").replace(/(voyager)$/,"$1_nolabels");
@@ -2143,11 +2147,24 @@ async function flythrough(layout){
       jobs.push(new Promise(res=>{const im=new Image();im.crossOrigin="anonymous";
         im.onload=()=>{tiles.push({im,x:X,y:Y});res();};im.onerror=()=>res();im.src=`https://a.basemaps.cartocdn.com/${baseStyle}/${z}/${wtx}/${ty}.png`;}));
     }
+  // a wide route in a tall frame leaves the bbox short of the frame edges at the final zoom-out,
+  // exposing a hard map edge top/bottom. Fetch a coarse base layer covering the WHOLE overview
+  // viewport (at a lower zoom → few tiles) and paint it under the sharp detail tiles.
+  const otiles=[],oscx=W*clr.sx,oscy=H*clr.sy;
+  const fx0=Math.min(wx0,bcx-oscx/kEnd)-128, fx1=Math.max(wx1,bcx+(W-oscx)/kEnd)+128;
+  const fy0=Math.min(wy0,bcy-oscy/kEnd)-128, fy1=Math.max(wy1,bcy+(H-oscy)/kEnd)+128;
+  const oz=Math.max(3,Math.min(z-1,zf-1)), of=2**(z-oz), OT=2**oz, ostep=256*of;
+  for(let otx=Math.floor(fx0/ostep);otx<=Math.floor(fx1/ostep);otx++)
+    for(let oty=Math.floor(fy0/ostep);oty<=Math.floor(fy1/ostep);oty++){
+      if(oty<0||oty>=OT)continue; const wtx=((otx%OT)+OT)%OT, X=otx*ostep, Y=oty*ostep;
+      jobs.push(new Promise(res=>{const im=new Image();im.crossOrigin="anonymous";
+        im.onload=()=>{otiles.push({im,x:X,y:Y,s:ostep+of});res();};im.onerror=()=>res();im.src=`https://a.basemaps.cartocdn.com/${baseStyle}/${oz}/${wtx}/${oty}.png`;}));
+    }
   await Promise.all(jobs);
   await loadCities();
   // major cities within the view, in world px — drawn as crisp vector labels, filtered/faded by zoom
   const kmPerPx=Math.cos((minLa+maxLa)/2*Math.PI/180)*40075/scale;
-  const cityPts=(CITIES||[]).filter(c=>c[1]>=minLa-0.4&&c[1]<=maxLa+0.4&&c[2]>=minLo-0.6&&c[2]<=maxLo+0.6)
+  const cityPts=(CITIES||[]).filter(c=>c[1]>=minLa-0.8&&c[1]<=maxLa+0.8&&c[2]>=minLo-1.0&&c[2]<=maxLo+1.0)
     .map(c=>({name:c[0],pop:c[3],wx:lon2x(c[2])*scale,wy:lat2y(c[1])*scale}));
   // ---- route in world px + cumulative distance (constant-speed reveal) ----
   const WPT=pos.map(p=>[lon2x(p[3])*scale,lat2y(p[2])*scale]);
@@ -2160,13 +2177,7 @@ async function flythrough(layout){
   const total=cum[cum.length-1]||1;
   const headWorld=r=>{for(let i=1;i<pos.length;i++){if(cum[i]>=r){const f=(r-cum[i-1])/((cum[i]-cum[i-1])||1);
     return [WPT[i-1][0]+(WPT[i][0]-WPT[i-1][0])*f, WPT[i-1][1]+(WPT[i][1]-WPT[i-1][1])*f];}} return WPT[WPT.length-1];};
-  // camera scales: overview fits the bbox; detail is a close follow, capped to avoid over-upscaling tiles
-  const kOver=Math.min(W/worldW,H/worldH)*0.92, kDetail=Math.min(kOver*(horiz?4.5:7.2),horiz?1.35:2.0);   // tighter follow on tall/square
-  // final overview fits the map into the area not covered by the stat panel (right for widescreen,
-  // bottom for square/vertical), and biases the camera the same way
-  // clr.w/clr.h can exceed 1 to OVER-fill (crop the route's non-limiting edges slightly rather than letterbox)
-  const clr = horiz ? {w:0.66,h:0.86,sx:0.34,sy:0.52} : vert ? {w:1.02,h:0.62,sx:0.5,sy:0.35} : {w:1.0,h:0.72,sx:0.5,sy:0.42};
-  const kEnd=Math.min((W*clr.w)/worldW,(H*clr.h)/worldH);
+  // (kOver / kDetail / clr / kEnd computed above, before the overview-fill tile fetch)
   // ---- overlay content (full stat set, "as per the PNGs") ----
   // labels static; values count up with the reveal (scaled from the final matched/raw stats)
   const LBL=[$("kKm").textContent,"moving time",$("kAvg").textContent,$("kMax").textContent,$("kClimb").textContent,"bends"];
@@ -2233,27 +2244,31 @@ async function flythrough(layout){
   }
   // crisp light-blue vector labels for major towns/cities: importance threshold scales with the
   // visible span (only big cities when zoomed out), size scales with population, overlaps declutter
+  const BIGPOP=250;   // ≥250k pop → major city (light blue), below → town (grey)
   function drawCities(k,scx,scy,cwx,cwy){
     if(!cityPts.length)return;
-    const visKm=(W/k)*kmPerPx, minPop=Math.max(45,visKm*0.42);
+    // density scales with the visible span: only big cities when zoomed out, more towns zoomed in.
+    // NO alpha fade — labels are solid & constant (no flicker/ghosting), just present or absent.
+    const visKm=(W/k)*kmPerPx, minPop=Math.max(16,visKm*0.28);
+    // text grows toward detail (up to 1.5×) while the overview scale stays as-is
+    const zt=Math.max(0,Math.min(1,(k-kOver)/((kDetail-kOver)||1))), sizeMul=1+0.5*zt;
     const yMax=horiz?H*0.97:H*0.60, xMax=horiz?W*0.68:W*0.97;   // keep out of the stat panel
     ctx.textAlign="left"; ctx.textBaseline="middle"; const drawn=[];
     for(const c of cityPts){
-      if(c.pop<minPop*0.6)break;                     // sorted by pop desc → the rest are smaller
-      const alpha=Math.min(1,(c.pop-minPop*0.6)/(minPop*0.5)); if(alpha<=0.05)continue;
+      if(c.pop<minPop)break;                          // sorted by pop desc → the rest are smaller
       const sx=(c.wx-cwx)*k+scx, sy=(c.wy-cwy)*k+scy;
       if(sx<-40||sx>xMax||sy<H*0.02||sy>yMax)continue;
-      const fs=Math.min(W*0.026,Math.max(W*0.0135,W*0.009*(1+Math.log10(c.pop/40))));
-      ctx.font=`600 ${Math.round(fs)}px 'IBM Plex Mono',monospace`;
+      const fs=Math.round(sizeMul*Math.min(W*0.024,Math.max(W*0.0125,W*0.0085*(1+Math.log10(c.pop/40)))));
+      ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
       const tw=ctx.measureText(c.name).width, dx=sx+fs*0.55, rect=[dx-2,sy-fs*0.65,tw+4,fs*1.3];
       let ov=false; for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1]){ov=true;break;}}
       if(ov)continue; drawn.push(rect);
-      ctx.globalAlpha=alpha;
-      ctx.fillStyle="rgba(147,198,255,.85)";ctx.beginPath();ctx.arc(sx,sy,Math.max(1.6,fs*0.14),0,7);ctx.fill();
+      const big=c.pop>=BIGPOP, txt=big?"#C7E4FF":"#9AA6B4", dot=big?"rgba(147,198,255,.9)":"rgba(150,162,178,.8)";
+      ctx.fillStyle=dot;ctx.beginPath();ctx.arc(sx,sy,Math.max(1.6,fs*0.13),0,7);ctx.fill();
       ctx.fillStyle="rgba(0,0,0,.75)";ctx.fillText(c.name,dx+1.5,sy+1.5);
-      ctx.fillStyle="#C7E4FF";ctx.fillText(c.name,dx,sy);
+      ctx.fillStyle=txt;ctx.fillText(c.name,dx,sy);
     }
-    ctx.globalAlpha=1; ctx.textBaseline="top";
+    ctx.textBaseline="top";
   }
   // ---- record ----
   const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
@@ -2296,7 +2311,8 @@ async function flythrough(layout){
     ctx.save();
     ctx.setTransform(k,0,0,k, scx-cwx*k, scy-cwy*k);
     const vx0=cwx-scx/k,vx1=cwx+(W-scx)/k,vy0=cwy-scy/k,vy1=cwy+(H-scy)/k;   // cull tiles outside the camera
-    for(const t of tiles){ if(t.x+257<vx0||t.x>vx1||t.y+257<vy0||t.y>vy1)continue; ctx.drawImage(t.im,t.x,t.y,257,257); }
+    for(const t of otiles){ if(t.x+t.s<vx0||t.x>vx1||t.y+t.s<vy0||t.y>vy1)continue; ctx.drawImage(t.im,t.x,t.y,t.s,t.s); }   // coarse fill under…
+    for(const t of tiles){ if(t.x+257<vx0||t.x>vx1||t.y+257<vy0||t.y>vy1)continue; ctx.drawImage(t.im,t.x,t.y,257,257); }   // …sharp detail tiles
     ctx.lineWidth=(W*0.0034)/k; ctx.lineJoin="round"; ctx.lineCap="round";
     const reveal=frac*total;
     for(let i=1;i<pos.length;i++){ if(brk[i])continue; if(cum[i-1]>=reveal)break;
