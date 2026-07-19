@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.0";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.1";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 const drop=$("drop"), file=$("file");
 
@@ -2129,14 +2129,20 @@ async function flythrough(layout){
   const scale=2**z*256;
   const wx0=lon2x(minLo)*scale, wx1=lon2x(maxLo)*scale, wy0=lat2y(maxLa)*scale, wy1=lat2y(minLa)*scale;
   const worldW=wx1-wx0||1, worldH=wy1-wy0||1, bcx=(wx0+wx1)/2, bcy=(wy0+wy1)/2;
-  // fetch tiles across the bbox (+1 tile margin)
-  const tiles=[],jobs=[]; const T=2**z;
+  // fetch tiles across the bbox (+1 tile margin): a no-labels base, plus the labels layer
+  // recoloured light blue so place names pop
+  const tiles=[],labelTiles=[],jobs=[]; const T=2**z;
+  const baseStyle=P.tiles.replace(/_all$/,"_nolabels").replace(/(voyager)$/,"$1_nolabels");
+  const lblStyle=P.tiles.replace(/_all$/,"_only_labels").replace(/(voyager)$/,"$1_only_labels");
   for(let tx=Math.floor(wx0/256)-1;tx<=Math.floor(wx1/256)+1;tx++)
     for(let ty=Math.floor(wy0/256)-1;ty<=Math.floor(wy1/256)+1;ty++){
-      if(ty<0||ty>=T)continue; const wtx=((tx%T)+T)%T;
-      const url=`https://a.basemaps.cartocdn.com/${P.tiles}/${z}/${wtx}/${ty}.png`;
+      if(ty<0||ty>=T)continue; const wtx=((tx%T)+T)%T, X=tx*256, Y=ty*256;
       jobs.push(new Promise(res=>{const im=new Image();im.crossOrigin="anonymous";
-        im.onload=()=>{tiles.push({im,x:tx*256,y:ty*256});res();};im.onerror=()=>res();im.src=url;}));
+        im.onload=()=>{tiles.push({im,x:X,y:Y});res();};im.onerror=()=>res();im.src=`https://a.basemaps.cartocdn.com/${baseStyle}/${z}/${wtx}/${ty}.png`;}));
+      jobs.push(new Promise(res=>{const im=new Image();im.crossOrigin="anonymous";
+        im.onload=()=>{const c=document.createElement("canvas");c.width=c.height=256;const cx=c.getContext("2d");
+          cx.drawImage(im,0,0);cx.globalCompositeOperation="source-in";cx.fillStyle="#93C6FF";cx.fillRect(0,0,256,256);   // tint labels light blue (keeps text alpha)
+          labelTiles.push({im:c,x:X,y:Y});res();};im.onerror=()=>res();im.src=`https://a.basemaps.cartocdn.com/${lblStyle}/${z}/${wtx}/${ty}.png`;}));
     }
   await Promise.all(jobs);
   // ---- route in world px + cumulative distance (constant-speed reveal) ----
@@ -2151,11 +2157,11 @@ async function flythrough(layout){
   const headWorld=r=>{for(let i=1;i<pos.length;i++){if(cum[i]>=r){const f=(r-cum[i-1])/((cum[i]-cum[i-1])||1);
     return [WPT[i-1][0]+(WPT[i][0]-WPT[i-1][0])*f, WPT[i-1][1]+(WPT[i][1]-WPT[i-1][1])*f];}} return WPT[WPT.length-1];};
   // camera scales: overview fits the bbox; detail is a close follow, capped to avoid over-upscaling tiles
-  const kOver=Math.min(W/worldW,H/worldH)*0.92, kDetail=Math.min(kOver*(horiz?4.5:6.2),horiz?1.35:1.75);   // tighter follow on tall/square
+  const kOver=Math.min(W/worldW,H/worldH)*0.92, kDetail=Math.min(kOver*(horiz?4.5:7.2),horiz?1.35:2.0);   // tighter follow on tall/square
   // final overview fits the map into the area not covered by the stat panel (right for widescreen,
   // bottom for square/vertical), and biases the camera the same way
   // clr.w/clr.h can exceed 1 to OVER-fill (crop the route's non-limiting edges slightly rather than letterbox)
-  const clr = horiz ? {w:0.66,h:0.86,sx:0.34,sy:0.52} : vert ? {w:1.25,h:0.66,sx:0.5,sy:0.35} : {w:1.08,h:0.74,sx:0.5,sy:0.42};
+  const clr = horiz ? {w:0.66,h:0.86,sx:0.34,sy:0.52} : vert ? {w:1.02,h:0.62,sx:0.5,sy:0.35} : {w:1.0,h:0.72,sx:0.5,sy:0.42};
   const kEnd=Math.min((W*clr.w)/worldW,(H*clr.h)/worldH);
   // ---- overlay content (full stat set, "as per the PNGs") ----
   // labels static; values count up with the reveal (scaled from the final matched/raw stats)
@@ -2273,6 +2279,9 @@ async function flythrough(layout){
         ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(bx,by);ctx.stroke();break;}
       ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(bx,by);ctx.stroke();
     }
+    ctx.globalAlpha=0.92;   // light-blue place names on top of the route
+    for(const t of labelTiles){ if(t.x+257<vx0||t.x>vx1||t.y+257<vy0||t.y>vy1)continue; ctx.drawImage(t.im,t.x,t.y,257,257); }
+    ctx.globalAlpha=1;
     const h=headWorld(reveal);
     ctx.fillStyle=P.accent;ctx.beginPath();ctx.arc(h[0],h[1],(W*0.009)/k,0,7);ctx.fill();
     ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(h[0],h[1],(W*0.0035)/k,0,7);ctx.fill();
