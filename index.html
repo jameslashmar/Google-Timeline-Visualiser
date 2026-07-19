@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.3";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.4";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -2165,7 +2165,7 @@ async function flythrough(layout){
   // major cities within the view, in world px — drawn as crisp vector labels, filtered/faded by zoom
   const kmPerPx=Math.cos((minLa+maxLa)/2*Math.PI/180)*40075/scale;
   const cityPts=(CITIES||[]).filter(c=>c[1]>=minLa-0.8&&c[1]<=maxLa+0.8&&c[2]>=minLo-1.0&&c[2]<=maxLo+1.0)
-    .map(c=>({name:c[0],pop:c[3],wx:lon2x(c[2])*scale,wy:lat2y(c[1])*scale}));
+    .map(c=>({name:c[0],pop:c[3],la:c[1],lo:c[2],wx:lon2x(c[2])*scale,wy:lat2y(c[1])*scale,forced:false}));
   // ---- route in world px + cumulative distance (constant-speed reveal) ----
   const WPT=pos.map(p=>[lon2x(p[3])*scale,lat2y(p[2])*scale]);
   // a segment only "breaks" the line if it's a long time gap AND the bike actually moved far
@@ -2175,6 +2175,16 @@ async function flythrough(layout){
     segd[i]=dk; brk[i]=(dt<=0)||(dt>GAP&&dk>2);}
   const cum=[0]; for(let i=1;i<pos.length;i++)cum[i]=cum[i-1]+(brk[i]?0:segd[i]);
   const total=cum[cum.length-1]||1;
+  // force a label at the start & end of every day and every segment break (the itinerary
+  // waypoints) regardless of population — nearest city in the worldwide dataset, so it works
+  // for any timeline in any country. Marked .forced so drawCities always shows them.
+  {
+    const bnd=new Set([0,pos.length-1]);
+    for(let i=1;i<pos.length;i++){ if(brk[i]||dayOf(pos[i])!==dayOf(pos[i-1])){ bnd.add(i); bnd.add(i-1); } }
+    for(const idx of bnd){ const la=pos[idx][2],lo=pos[idx][3]; let best=null,bd=40;   // ≤40 km or unnameable
+      for(const c of cityPts){ const d=hav(la,lo,c.la,c.lo); if(d<bd){bd=d;best=c;} }
+      if(best)best.forced=true; }
+  }
   const headWorld=r=>{for(let i=1;i<pos.length;i++){if(cum[i]>=r){const f=(r-cum[i-1])/((cum[i]-cum[i-1])||1);
     return [WPT[i-1][0]+(WPT[i][0]-WPT[i-1][0])*f, WPT[i-1][1]+(WPT[i][1]-WPT[i-1][1])*f];}} return WPT[WPT.length-1];};
   // (kOver / kDetail / clr / kEnd computed above, before the overview-fill tile fetch)
@@ -2210,65 +2220,73 @@ async function flythrough(layout){
       const px=W*0.70, sx=px+W*0.028, vFs=W*0.027, kFs=W*0.0115, twVfs=W*0.026;
       const rg=ctx.createLinearGradient(px,0,W,0); rg.addColorStop(0,"rgba(0,0,0,0)");rg.addColorStop(.4,"rgba(0,0,0,.72)");rg.addColorStop(1,"rgba(0,0,0,.85)");
       ctx.fillStyle=rg;ctx.fillRect(px,0,W-px,H);
-      const twLines=wrapTo(twK,W-M-sx,mono(kFs)), twBlock=W*0.012+twVfs*1.15+twLines.length*kFs*1.5;
+      const padTw=W*0.016;   // breathing room above the divider and the twistiness score
+      const twLines=wrapTo(twK,W-M-sx,mono(kFs)), twBlock=W*0.028+padTw+twVfs*1.15+twLines.length*kFs*1.5;
       const stride=(H-2*M-twBlock)/LBL.length;
       LBL.forEach((lb,i)=>{const y=M+i*stride; ctx.fillStyle="#fff";ctx.font=cond(800,vFs);ctx.fillText(vals[i],sx,y);
         ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs);ctx.fillText(lb.toUpperCase(),sx,y+vFs*1.12);});
-      const ty=M+LBL.length*stride;
+      const ty=M+LBL.length*stride+W*0.012;
       ctx.strokeStyle="rgba(255,255,255,.25)";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(sx,ty);ctx.lineTo(W-M,ty);ctx.stroke();
-      ctx.fillStyle=P.accent;ctx.font=cond(800,twVfs);ctx.fillText(twV,sx,ty+W*0.008);
-      ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs); let ly=ty+W*0.008+twVfs*1.15;
+      ctx.fillStyle=P.accent;ctx.font=cond(800,twVfs);ctx.fillText(twV,sx,ty+padTw);
+      ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs); let ly=ty+padTw+twVfs*1.15;
       for(const ln of twLines){ctx.fillText(ln,sx,ly);ly+=kFs*1.5;}
-      ctx.fillStyle="rgba(255,255,255,.5)";ctx.font=mono(W*0.009);ctx.textAlign="right";
-      ctx.fillText("© OPENSTREETMAP © CARTO",W-M,H-W*0.02);ctx.textAlign="left";
+      ctx.fillStyle="rgba(255,255,255,.45)";ctx.font=mono(W*0.009);ctx.textAlign="right";ctx.textBaseline="bottom";
+      ctx.fillText("© OPENSTREETMAP © CARTO",W-M,H-W*0.014);ctx.textAlign="left";ctx.textBaseline="top";   // very bottom-right
     } else {
       // square / vertical: translucent bottom panel, stats in a grid
       const cols=vert?2:3, nRows=Math.ceil(LBL.length/cols);
       const vFs=W*(vert?0.055:0.05), kFs=W*0.018, twVfs=W*0.05;
       const rowH=vFs*1.15+kFs+W*0.03, cw=(W-2*M)/cols;
-      const twLines=wrapTo(twK,W-2*M,mono(kFs)), twBlock=W*0.012+twVfs*1.15+twLines.length*kFs*1.4;
-      const panelH=nRows*rowH+W*0.02+twBlock+M, panelTop=H-panelH, fadeTop=panelTop-W*0.07;
+      const padHR=W*0.032, padTw=W*0.024;   // breathing room above the divider and the twistiness score
+      const twLines=wrapTo(twK,W-2*M,mono(kFs));
+      const twBlock=padHR+padTw+twVfs*1.15+twLines.length*kFs*1.4;
+      const panelH=nRows*rowH+twBlock+M, panelTop=H-panelH, fadeTop=panelTop-W*0.07;
       const bg=ctx.createLinearGradient(0,fadeTop,0,H); bg.addColorStop(0,"rgba(0,0,0,0)");bg.addColorStop(.35,"rgba(0,0,0,.72)");bg.addColorStop(1,"rgba(0,0,0,.9)");
       ctx.fillStyle=bg;ctx.fillRect(0,fadeTop,W,H-fadeTop);
-      ctx.fillStyle="rgba(255,255,255,.5)";ctx.font=mono(W*0.013);ctx.textAlign="right";
-      ctx.fillText("© OPENSTREETMAP © CARTO",W-M,fadeTop-W*0.02);ctx.textAlign="left";
       vals.forEach((v,i)=>{const cx=M+(i%cols)*cw, y=panelTop+Math.floor(i/cols)*rowH;
         ctx.fillStyle="#fff";ctx.font=cond(800,vFs);ctx.fillText(v,cx,y);
         ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs);ctx.fillText(LBL[i].toUpperCase(),cx,y+vFs*1.02);});
-      const ty=panelTop+nRows*rowH+W*0.006;
+      const ty=panelTop+nRows*rowH+padHR;
       ctx.strokeStyle="rgba(255,255,255,.25)";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(M,ty);ctx.lineTo(W-M,ty);ctx.stroke();
-      ctx.fillStyle=P.accent;ctx.font=cond(800,twVfs);ctx.fillText(twV,M,ty+W*0.01);
-      ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs); let ly=ty+W*0.01+twVfs*1.15;
+      ctx.fillStyle=P.accent;ctx.font=cond(800,twVfs);ctx.fillText(twV,M,ty+padTw);
+      ctx.fillStyle="rgba(255,255,255,.6)";ctx.font=mono(kFs); let ly=ty+padTw+twVfs*1.15;
       for(const ln of twLines){ctx.fillText(ln,M,ly);ly+=kFs*1.4;}
+      ctx.fillStyle="rgba(255,255,255,.45)";ctx.font=mono(W*0.012);ctx.textAlign="right";ctx.textBaseline="bottom";
+      ctx.fillText("© OPENSTREETMAP © CARTO",W-M,H-W*0.014);ctx.textAlign="left";ctx.textBaseline="top";   // very bottom-right
     }
   }
   // crisp light-blue vector labels for major towns/cities: importance threshold scales with the
   // visible span (only big cities when zoomed out), size scales with population, overlaps declutter
-  const BIGPOP=250;   // ≥250k pop → major city (light blue), below → town (grey)
+  const BIGPOP=220;   // ≥220k pop → major city (light blue), below → town (grey)
+  let cityShown=new Set();   // names drawn last frame → priority to stay drawn (kills flicker)
   function drawCities(k,scx,scy,cwx,cwy){
     if(!cityPts.length)return;
     // density scales with the visible span: only big cities when zoomed out, more towns zoomed in.
-    // NO alpha fade — labels are solid & constant (no flicker/ghosting), just present or absent.
+    // NO alpha fade — labels are solid. Day/segment endpoints (.forced) always qualify.
     const visKm=(W/k)*kmPerPx, minPop=Math.max(16,visKm*0.28);
     // text grows toward detail (up to 1.5×) while the overview scale stays as-is
     const zt=Math.max(0,Math.min(1,(k-kOver)/((kDetail-kOver)||1))), sizeMul=1+0.5*zt;
     const yMax=horiz?H*0.97:H*0.60, xMax=horiz?W*0.68:W*0.97;   // keep out of the stat panel
-    ctx.textAlign="left"; ctx.textBaseline="middle"; const drawn=[];
-    for(const c of cityPts){
-      if(c.pop<minPop)break;                          // sorted by pop desc → the rest are smaller
+    // candidate labels this frame; resolve overlaps by a STABLE score so a label shown last frame
+    // keeps its slot (no blink as the camera pans) — but stickiness is only a 1.4× pop boost, so a
+    // small town can never block a bigger city (e.g. a suburb hiding Madrid). Forced always win.
+    const score=c=>(c.forced?1e12:0)+c.pop*(cityShown.has(c.name)?1.4:1);
+    const cand=cityPts.filter(c=>c.forced||c.pop>=minPop).sort((p,q)=>score(q)-score(p));
+    ctx.textAlign="left"; ctx.textBaseline="middle"; const drawn=[], now=new Set();
+    for(const c of cand){
       const sx=(c.wx-cwx)*k+scx, sy=(c.wy-cwy)*k+scy;
       if(sx<-40||sx>xMax||sy<H*0.02||sy>yMax)continue;
-      const fs=Math.round(sizeMul*Math.min(W*0.024,Math.max(W*0.0125,W*0.0085*(1+Math.log10(c.pop/40)))));
+      const fs=Math.round(sizeMul*Math.min(W*0.024,Math.max(W*0.0125,W*0.0085*(1+Math.log10(Math.max(c.pop,25)/40)))));
       ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
       const tw=ctx.measureText(c.name).width, dx=sx+fs*0.55, rect=[dx-2,sy-fs*0.65,tw+4,fs*1.3];
       let ov=false; for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1]){ov=true;break;}}
-      if(ov)continue; drawn.push(rect);
+      if(ov)continue; drawn.push(rect); now.add(c.name);
       const big=c.pop>=BIGPOP, txt=big?"#C7E4FF":"#9AA6B4", dot=big?"rgba(147,198,255,.9)":"rgba(150,162,178,.8)";
       ctx.fillStyle=dot;ctx.beginPath();ctx.arc(sx,sy,Math.max(1.6,fs*0.13),0,7);ctx.fill();
       ctx.fillStyle="rgba(0,0,0,.75)";ctx.fillText(c.name,dx+1.5,sy+1.5);
       ctx.fillStyle=txt;ctx.fillText(c.name,dx,sy);
     }
-    ctx.textBaseline="top";
+    cityShown=now; ctx.textBaseline="top";
   }
   // ---- record ----
   const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
