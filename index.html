@@ -151,7 +151,7 @@
   .matched .v::after{content:" ⌖";font-size:14px;color:var(--amber)}
 
   .refinebar{display:flex;gap:12px;align-items:center;margin:2px 0 16px}
-  .refnote{font-family:var(--mono);font-size:10.5px;color:var(--dim);line-height:1.55}
+  .refnote{font-family:var(--mono);font-size:10.5px;color:var(--white);line-height:1.55}
   /*bar*//*bar*/.mini{background:var(--groove);border:1px solid var(--amber-dim);color:var(--amber);border-radius:99px;
         padding:4px 12px;font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:600;
         margin-left:0;flex:0 0 auto}
@@ -746,7 +746,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.16";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.17";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
