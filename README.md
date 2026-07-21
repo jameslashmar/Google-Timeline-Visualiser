@@ -4,7 +4,7 @@ A single-file, **fully client-side** web tool that turns a Google Timeline expor
 
 **→ Live: https://jameslashmar.github.io/Google-Timeline-Visualiser/**
 
-![Google Timeline Visualiser — a Porto→León ride sliced from a Timeline export: stats, speed-coloured map and elevation/speed profile](screenshot.png)
+![Google Timeline Visualiser — an eight-day Iberia tour sliced from a Timeline export: stats, weather, speed-coloured map and elevation/speed profile](screenshot.png)
 
 Drop your `Timeline.json` (or a `.gpx` / `.csv`), pick a date range, and get:
 
@@ -27,6 +27,18 @@ Drop your `Timeline.json` (or a `.gpx` / `.csv`), pick a date range, and get:
 - **Instant reopen** — your last import is cached locally (IndexedDB), so revisiting restores it without re-loading the big file (clearable, never leaves your device).
 
 Everything parses in your browser. **Your location data is never uploaded** — the only network calls are optional and disclosed (map tiles, and the opt-in road-matching request).
+
+### Ride cards
+
+Shareable PNGs with the road-matched route, place names (amber = towns you rode through), per-day weather and the full stat block — in vertical, square and widescreen:
+
+![Example ride card — eight-day Iberia tour, widescreen layout](ride-card.png)
+
+### Flythrough
+
+A 30 fps MP4 of the route drawing itself on at constant speed with a follow-cam, count-up stats and day-by-day weather, ending on the full-tour overview *(sped-up preview)*:
+
+![Flythrough preview — the route draws on with a follow-cam, then zooms out to the tour overview](flythrough.gif)
 
 ---
 
