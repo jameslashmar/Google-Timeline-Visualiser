@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.13";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.14";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -2554,8 +2554,9 @@ async function flythrough(layout){
   // ---- record ----
   const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
   ctx.imageSmoothingQuality="high";
-  let rec,parts=[];
-  try{const stream=cv.captureStream(30); rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:16e6});
+  let rec,parts=[],VTRACK=null;
+  try{const stream=cv.captureStream(0); VTRACK=stream.getVideoTracks()[0];   // manual capture: one frame per fixed sim step
+    rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:16e6});
   }catch(e){setBusy("Recorder failed");setTimeout(endBusy,2000);return;}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
   const done=new Promise(res=>rec.onstop=res);   // (recorder started after the warm-up below)
@@ -2563,7 +2564,10 @@ async function flythrough(layout){
   // clamped so short rides aren't too quick and whole-tour ranges aren't endless)
   const DRAW=Math.round(Math.min(34000,Math.max(12000,total*70)));   // ~2.5× slower reveal than before
   const SETTLE=500, ZOUT=3000, HOLD=(horiz||vert)?3700:1700;   // longer read time on the overview
-  let t0=performance.now(), warm=true;   // t0 reset after the warm-up pass
+  // FIXED-STEP simulation time: each painted frame advances exactly 1/30 s regardless of
+  // wall clock, so motion strides are perfectly uniform (wall-clock sampling made captured
+  // frames advance by varying amounts → judder even with every frame unique)
+  let simT=0, warm=true;
   setBusy("Rendering video…");
   const easeIO=e=>e<.5?2*e*e:1-((-2*e+2)**2)/2;
   // reveal velocity: constant for the first C of the draw, then ramps to 0 → the line
@@ -2573,7 +2577,7 @@ async function flythrough(layout){
   let camX=null,camY=null,snap=null; const SMOOTH=total>700?0.05:0.10;   // gentler follow-cam pan on longer routes (less edge wobble)
   let shownDay=null,fadeStart=-1; const WXFADE=700;   // per-day weather cross-fade state
   function frame(){
-    const el=performance.now()-t0; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
+    const el=simT; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
     if(el<DRAW+SETTLE){                       // draw + a brief settle held on the finished detail view
       frac=revealFrac(Math.min(1,el/DRAW));   // constant, then eases to a stop near the end
       const h=headWorld(frac*total);
@@ -2631,8 +2635,7 @@ async function flythrough(layout){
     }
     overlay(frac,ri,wxLine,wxAlpha);
     busyTxt.textContent="Rendering video… "+Math.min(99,Math.round(el/(DRAW+SETTLE+ZOUT+HOLD)*100))+"%";
-    if(warm)return;   // warm-up paint: no scheduling, recorder not yet running
-    if(el<DRAW+SETTLE+ZOUT+HOLD)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},250);
+    if(warm)return;   // warm-up paint: recorder not yet running (pacer below schedules)
   }
   // ---- warm-up: force-decode every tile and JIT-warm the full frame path BEFORE the
   // recorder starts — image decode used to land on the first recorded frames (start stutter)
@@ -2640,9 +2643,23 @@ async function flythrough(layout){
    for(const t of otiles)try{wctx.drawImage(t.im,0,0,8,8)}catch(e){}
    for(const t of tiles)try{wctx.drawImage(t.im,0,0,8,8)}catch(e){}}
   frame(); frame();          // two dry paints of the opening view
-  warm=false; rec.start(1000);   // timeslice so the tail isn't dropped
-  t0=performance.now();
-  requestAnimationFrame(frame);
+  warm=false;
+  // pacer: paint fixed 1/30 s sim steps at ~real time, capturing exactly one frame per step.
+  // Started only once the recorder reports it is live — frames pushed during encoder
+  // spin-up were silently dropped (missing captures = double-stride hitches).
+  const STEP=1000/30, TOTAL=DRAW+SETTLE+ZOUT+HOLD;
+  function pace(){
+    const nw=performance.now();
+    if(nw>=nextP-1){
+      simT+=STEP; frame();
+      try{VTRACK&&VTRACK.requestFrame()}catch(e){}
+      nextP+=STEP; if(nw>nextP+300)nextP=nw+STEP;   // fell behind → resync rather than burst
+    }
+    if(simT<TOTAL)requestAnimationFrame(pace); else setTimeout(()=>{try{rec.stop()}catch(e){}},250);
+  }
+  let nextP=0;
+  rec.onstart=()=>{nextP=performance.now()+100;requestAnimationFrame(pace);};   // small settle after start
+  rec.start(1000);   // timeslice so the tail isn't dropped
   await done;
   const ext=mime.indexOf("mp4")>=0?"mp4":"webm";
   saveBlob(`ride-${a}${a!==b?"_"+b:""}-flythrough-${layout}.${ext}`,new Blob(parts,{type:mime}));
