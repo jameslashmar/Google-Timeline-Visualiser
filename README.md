@@ -32,7 +32,7 @@ Everything parses in your browser. **Your location data is never uploaded** — 
 
 Shareable PNGs with the road-matched route, place names (amber = towns you rode through), per-day weather and the full stat block — in vertical, square and widescreen:
 
-![Example ride card — eight-day Iberia tour, widescreen layout](ride-card.png)
+![Example ride card — eight-day Iberia tour, widescreen layout](card-example.png)
 
 ### Flythrough
 
