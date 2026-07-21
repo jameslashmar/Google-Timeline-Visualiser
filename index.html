@@ -619,6 +619,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
           <div class="small">or click to browse
             <span class="fmtline"><b>Timeline.json</b> — Android: Settings → Location → Location Services → Timeline → Export · iPhone: Google Maps → Your Timeline → ⚙ → Export</span>
             <span class="fmtline"><b>.gpx</b> — from an action cam / GPS logger (denser = truer bends)</span>
+            <span class="fmtline"><b>Apple Watch</b> — Health app → profile → Export All Health Data → drop the <b>workout-routes</b> .gpx files</span>
             <span class="fmtline"><b>.csv</b> — re-imports this tool's own export</span>
           </div>
         </div>
@@ -744,7 +745,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.14";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.15";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;

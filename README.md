@@ -48,6 +48,16 @@ Google moved Timeline **on-device** in 2024 — the web Timeline is gone and Goo
 2. Open the **settings** (gear / "Location & privacy settings").
 3. Choose **Export Timeline data** and save the `Timeline.json`.
 
+**iPhone without Google Maps — Apple Watch / Fitness workouts:**
+
+Apple has no Timeline-style export — Significant Locations never leaves the phone. But if you record your rides as **workouts** (Apple Watch, or the Fitness app on the phone), their GPS routes can:
+
+1. Open the **Health** app → tap your **profile picture** → **Export All Health Data**.
+2. Unzip the export — the **`workout-routes/`** folder has one **`.gpx` file per workout**.
+3. Drop those GPX files straight into the tool.
+
+Watch workouts log GPS about once a second — far denser than Timeline's ~1/minute — so bend counts and speed colouring come out **more** accurate, no road-matching needed.
+
 > The file can be ~50–60 MB. That's normal — it's your whole history. This tool loads it locally and slices out only the dates you ask for; nothing is sent anywhere.
 
 Then just open the [live site](https://jameslashmar.github.io/Google-Timeline-Visualiser/) and **drop the file in**.
@@ -58,7 +68,7 @@ Then just open the [live site](https://jameslashmar.github.io/Google-Timeline-Vi
 
 You don't need Google Timeline at all — you can drop:
 
-- **`.gpx`** — from an action cam (e.g. Insta360), bike GPS, or any GPS logger. These log far more often than Timeline (often ~10 Hz vs ~1/min), so bend counts and speed colouring are **much more accurate** — no road-matching needed. Per-point speed is read from the file or derived from the track.
+- **`.gpx`** — from an action cam (e.g. Insta360), bike GPS, an **Apple Watch workout** (see the Health export steps above), or any GPS logger. These log far more often than Timeline (often ~1–10 Hz vs ~1/min), so bend counts and speed colouring are **much more accurate** — no road-matching needed. Per-point speed is read from the file or derived from the track.
 - **`.csv`** — re-imports this tool's own CSV export (`timestamp, lat, lng, speed_kmh, altitude, source`). Common column aliases (`latitude`, `lon`, `elevation`, …) are understood too.
 
 Everything downstream — stats, map, profile, ride cards, exports — works identically whatever you drop in.
