@@ -617,7 +617,8 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
         <div id="drop" role="button" tabindex="0" aria-label="Load Timeline.json, GPX or CSV">
           <div class="big">Drop Timeline.json, GPX or CSV here</div>
           <div class="small">or click to browse
-            <span class="fmtline"><b>Timeline.json</b> — Android: Settings → Location → Location Services → Timeline → Export · iPhone: Google Maps → Your Timeline → ⚙ → Export</span>
+            <span class="fmtline"><b>Android</b> — Settings → Location → Location Services → Timeline → Export Timeline data</span>
+            <span class="fmtline"><b>iPhone</b> — Google Maps → Your Timeline → ⚙ → Export Timeline data</span>
             <span class="fmtline"><b>.gpx</b> — from an action cam / GPS logger (denser = truer bends)</span>
             <span class="fmtline"><b>Apple Watch</b> — Health app → profile → Export All Health Data → drop the <b>workout-routes</b> .gpx files</span>
             <span class="fmtline"><b>.csv</b> — re-imports this tool's own export</span>
@@ -745,7 +746,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.15";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.16";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -1238,6 +1239,39 @@ experience stays fully offline. Tiles come from basemaps.cartocdn.com
 (OpenStreetMap data) — that's the only extra network dependency.
 =================================================================== */
 let LMAP=null,mapLayer=null,mapOn=false,PROF=null;
+// Loose "home" view from the browser's IANA timezone — region-level only, and completely
+// silent: no geolocation permission prompt, no IP-lookup call, nothing leaves the tab.
+function tzView(){
+  const T={"Europe/London":[52.5,-1.5,6],"Europe/Dublin":[53.3,-7.8,7],"Europe/Paris":[46.8,2.4,6],
+    "Europe/Madrid":[40.3,-3.7,6],"Europe/Lisbon":[39.6,-8.0,7],"Europe/Berlin":[51.1,10.3,6],
+    "Europe/Rome":[42.6,12.9,6],"Europe/Amsterdam":[52.2,5.4,7],"Europe/Brussels":[50.6,4.6,8],
+    "Europe/Zurich":[46.8,8.2,8],"Europe/Vienna":[47.6,14.1,7],"Europe/Prague":[49.8,15.4,7],
+    "Europe/Warsaw":[52.1,19.4,6],"Europe/Stockholm":[62,15,5],"Europe/Oslo":[64.5,11,5],
+    "Europe/Copenhagen":[56,10,7],"Europe/Helsinki":[64.9,26,5],"Europe/Athens":[38.9,23.7,6],
+    "Europe/Istanbul":[39,35,6],"Europe/Kyiv":[49,31.4,6],"Europe/Moscow":[55.7,37.6,6],
+    "America/New_York":[40.9,-74.5,6],"America/Chicago":[41.5,-89,6],"America/Denver":[39.5,-105.5,6],
+    "America/Phoenix":[33.9,-111.8,7],"America/Los_Angeles":[36.5,-119.5,6],"America/Toronto":[44.5,-79.5,6],
+    "America/Vancouver":[49.5,-122.5,7],"America/Mexico_City":[19.9,-99.5,6],"America/Bogota":[4.6,-74,6],
+    "America/Lima":[-9.5,-75.5,5],"America/Santiago":[-33.5,-70.8,6],"America/Sao_Paulo":[-23,-47,6],
+    "America/Argentina/Buenos_Aires":[-35.5,-60,6],
+    "Asia/Tokyo":[36.5,138.5,6],"Asia/Seoul":[36.5,127.8,7],"Asia/Shanghai":[32,116,5],
+    "Asia/Hong_Kong":[22.4,114.1,9],"Asia/Taipei":[23.8,121,7],"Asia/Singapore":[1.35,103.8,10],
+    "Asia/Bangkok":[14.5,101,6],"Asia/Kolkata":[21.5,79,5],"Asia/Dubai":[24.5,54.5,7],
+    "Asia/Jerusalem":[31.5,35,7],"Asia/Riyadh":[24,45,6],"Asia/Manila":[13,122,6],"Asia/Jakarta":[-6.5,107.5,7],
+    "Australia/Sydney":[-33.5,150,6],"Australia/Melbourne":[-37.5,144.8,7],"Australia/Brisbane":[-26.5,152,6],
+    "Australia/Perth":[-32,116,6],"Pacific/Auckland":[-38.5,175.5,6],
+    "Africa/Johannesburg":[-28.5,25,6],"Africa/Cairo":[29,31,6],"Africa/Lagos":[8,8.5,6],
+    "Africa/Nairobi":[0.2,37.5,6],"Africa/Casablanca":[32.5,-6.5,6]};
+  const P={"Europe":[50,10,4],"America":[40,-95,4],"Asia":[30,90,3],"Africa":[2,20,3],
+    "Australia":[-27,134,4],"Pacific":[-20,175,4],"Atlantic":[35,-30,3],"Indian":[-10,75,3]};
+  try{
+    const tz=Intl.DateTimeFormat().resolvedOptions().timeZone||"";
+    if(T[tz])return [[T[tz][0],T[tz][1]],T[tz][2]];
+    const p=P[tz.split("/")[0]];
+    if(p)return [[p[0],p[1]],p[2]];
+  }catch(e){}
+  return [[41,-6],6];   // previous fixed default
+}
 const THEME_CFG={
   dash:{speed:{c0:"#566067",c1:"#3DDC5C",c2:"#FFB300",c3:"#FF3B30"},start:"#F2F4F6",end:"#FF3B30",
         matched:"#FF3B30",base:"Night",card:{bg:"#0A0A0B",fg:"#E8EAED",sub:"#8D949E",accent:"#FF3B30",grid:"#1B1E23",tiles:"dark_all"}},
@@ -1282,7 +1316,8 @@ $("mapToggle").addEventListener("click",async()=>{
       if(!ok) await loadCss("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
       if(!LMAP){
         LMAP=L.map("map",{zoomControl:true});
-        LMAP.setView([41.0,-6.0],6); // sensible start before any data fits bounds
+        LMAP.setView(...tzView()); // loose viewer locale from the browser TIMEZONE — no
+                                   // geolocation prompt, no IP lookup, nothing leaves the tab
         const osmAttr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
         const bases={
           "Road":L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
