@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.4";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.7";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -902,11 +902,34 @@ async function renderCard(ctx, layout, W, H, pos, opts){
   if(rider){ctx.textAlign="right";ctx.fillStyle=P.fg;ctx.font=mono(eyeFs);
     ctx.fillText(rider.toUpperCase(),W-M,M);ctx.textAlign="left";}
   ctx.fillStyle=P.fg;ctx.font=cond(800,dateFs);
-  ctx.fillText(a===b?dfmt(a):dfmt(a)+" — "+dfmt(b),M,M+eyeFs*1.6);
-  let extraH=0;                       // weather line under the date, if fetched for this range
-  if(WX&&WX.a===a&&WX.b===b){
+  const dateStr=a===b?dfmt(a):dfmt(a)+" — "+dfmt(b);
+  ctx.fillText(dateStr,M,M+eyeFs*1.6);
+  if((opts.nDays||0)>1){              // multi-day ride → say how many days, right of the date
+    const dw=ctx.measureText(dateStr).width, cFs=eyeFs*1.1;
+    ctx.fillStyle=P.accent;ctx.font=mono(cFs);
+    ctx.fillText(`${opts.nDays} DAYS`,M+dw+W*0.014,M+eyeFs*1.6+(dateFs-cFs)*0.58);
+  }
+  let extraH=0;                       // weather under the date, if fetched for this range
+  const wxY=Math.round(M+eyeFs*1.6+dateFs*1.15+W*0.006);
+  if(opts.dayWx&&Object.keys(opts.dayWx).length>1){
+    // multi-day: compact strip — dim day-of-month + icon + temp per riding day, shrunk to fit
+    const toks=Object.keys(opts.dayWx).sort().map(d=>({n:String(+d.slice(8,10)),s:`${opts.dayWx[d].icon} ${opts.dayWx[d].t}°`}));
+    let wFs=eyeFs*1.02; const maxW2=W-2*M;
+    const meas=f=>{const ws=toks.map(t2=>{ctx.font=mono(f*0.78);const nw=ctx.measureText(t2.n).width;
+      ctx.font=mono(f);return nw+f*0.35+ctx.measureText(t2.s).width;});
+      return {ws,total:ws.reduce((x2,y2)=>x2+y2,0)+(toks.length-1)*f*1.4};};
+    let mm=meas(wFs); if(mm.total>maxW2){wFs=Math.max(eyeFs*0.62,wFs*maxW2/mm.total);mm=meas(wFs);}
+    let xx=M;
+    for(let i2=0;i2<toks.length;i2++){
+      ctx.save();ctx.globalAlpha=0.55;ctx.fillStyle=P.sub;ctx.font=mono(wFs*0.78);
+      ctx.fillText(toks[i2].n,xx,wxY+wFs*0.14);const nw=ctx.measureText(toks[i2].n).width;ctx.restore();
+      ctx.fillStyle=P.sub;ctx.font=mono(wFs);ctx.fillText(toks[i2].s,xx+nw+wFs*0.35,wxY);
+      xx+=mm.ws[i2]+wFs*1.4;
+    }
+    extraH=eyeFs*1.5;
+  }else if(WX&&WX.a===a&&WX.b===b){
     ctx.fillStyle=P.sub;ctx.font=mono(eyeFs*0.98);
-    ctx.fillText(WX.line,M,Math.round(M+eyeFs*1.6+dateFs*1.15+W*0.006));
+    ctx.fillText(WX.line,M,wxY);
     extraH=eyeFs*1.5;
   }
   const headH=Math.round(M+eyeFs*1.6+dateFs*1.15+extraH+W*0.02);
@@ -919,10 +942,10 @@ async function renderCard(ctx, layout, W, H, pos, opts){
            [$("sAvg").textContent,$("kAvg").textContent],
            [$("sMax").textContent,$("kMax").textContent],
            [$("sClimb").textContent,$("kClimb").textContent],
-           [$("sBends").textContent,"bends"]];
+           [$("sBends").textContent,"bends (L/R)"]];
   const twVfs=W*(horiz?0.026:0.032);
   const twPad=Math.round(W*0.008);
-  const mapW=horiz?Math.round(W*0.58):0;
+  const mapW=horiz?Math.round(W*0.64):0;   // widescreen: give the map more of the frame
   const twW=horiz?(W-(M+mapW+M)-M):(W-2*M);            // twistiness column width (known up front)
   // word-wrap the (variable-length) twistiness subtitle to fit twW at the label font
   ctx.font=mono(kFs);
@@ -950,55 +973,134 @@ async function renderCard(ctx, layout, W, H, pos, opts){
     cells=S.map((s2,i)=>({s:s2,x:M+(i%cols)*cw,y:gy+Math.floor(i/cols)*rowH}));
     twX=M;twY=gy+nRows*rowH+statsTwGap;
   }
-  // ---- basemap tiles under the route (web-mercator) ----
+  // ---- basemap tiles under the route (web-mercator, fractional-fill scale) ----
   if(pos.length>1){
     let[minLa,maxLa,minLo,maxLo]=[90,-90,180,-180];
     for(const p of pos){minLa=Math.min(minLa,p[2]);maxLa=Math.max(maxLa,p[2]);
                         minLo=Math.min(minLo,p[3]);maxLo=Math.max(maxLo,p[3]);}
-    const padLa=(maxLa-minLa)*0.12||0.001,padLo=(maxLo-minLo)*0.12||0.001;
+    const padLa=(maxLa-minLa)*0.06||0.001,padLo=(maxLo-minLo)*0.06||0.001;
     minLa-=padLa;maxLa+=padLa;minLo-=padLo;maxLo+=padLo;
     const lat2y=la=>{const s2=Math.sin(la*Math.PI/180);return 0.5-Math.log((1+s2)/(1-s2))/(4*Math.PI);};
     const lon2x=lo=>(lo+180)/360;
+    // integer tile zooms left the route small in the frame — pick one zoom DEEPER than the
+    // integer fit, then scale fractionally so the route fills the map region edge to edge
     let z=3;
     for(;z<17;z++){
       const px=(lon2x(maxLo)-lon2x(minLo))*256*2**(z+1);
       const py=(lat2y(minLa)-lat2y(maxLa))*256*2**(z+1);
       if(px>tr.w||py>tr.h)break;
     }
-    z=Math.max(4,Math.min(z,16));
+    z=Math.max(4,Math.min(z+1,16));
+    const tileCount=zz=>{const s2=2**zz*256;
+      return (Math.floor(lon2x(maxLo)*s2/256)-Math.floor(lon2x(minLo)*s2/256)+2)*(Math.floor(lat2y(minLa)*s2/256)-Math.floor(lat2y(maxLa)*s2/256)+2);};
+    while(z>4&&tileCount(z)>320)z--;
     const scale=2**z*256;
+    const spanX=(lon2x(maxLo)-lon2x(minLo))*scale||1, spanY=(lat2y(minLa)-lat2y(maxLa))*scale||1;
+    const kk=Math.min(tr.w/spanX,tr.h/spanY);            // fills the region (bbox pad is the margin)
     const cx=(lon2x(minLo)+lon2x(maxLo))/2*scale, cy=(lat2y(maxLa)+lat2y(minLa))/2*scale;
-    const ox=tr.x+tr.w/2-cx, oy=tr.y+tr.h/2-cy;
+    const ox=tr.x+tr.w/2-cx*kk, oy=tr.y+tr.h/2-cy*kk;
     ctx.save();ctx.beginPath();ctx.rect(tr.x,tr.y,tr.w,tr.h);ctx.clip();
-    const tx0=Math.floor((cx-tr.w/2)/256),tx1=Math.floor((cx+tr.w/2)/256);
-    const ty0=Math.floor((cy-tr.h/2)/256),ty1=Math.floor((cy+tr.h/2)/256);
+    const tx0=Math.floor((cx-(tr.w/2)/kk)/256),tx1=Math.floor((cx+(tr.w/2)/kk)/256);
+    const ty0=Math.floor((cy-(tr.h/2)/kk)/256),ty1=Math.floor((cy+(tr.h/2)/kk)/256);
+    // no-labels basemap — place names drawn as crisp vector labels below (same system as the flythrough)
+    const baseStyle=P.tiles.replace(/_all$/,"_nolabels").replace(/(voyager)$/,"$1_nolabels");
     const jobs=[];
     for(let tx=tx0;tx<=tx1;tx++)for(let ty=ty0;ty<=ty1;ty++){
       if(ty<0||ty>=2**z)continue;
       const wx=((tx%2**z)+2**z)%2**z;
-      const url=`https://a.basemaps.cartocdn.com/${P.tiles}/${z}/${wx}/${ty}.png`;
+      const url=`https://a.basemaps.cartocdn.com/${baseStyle}/${z}/${wx}/${ty}.png`;
       jobs.push(new Promise(res=>{const im=new Image();im.crossOrigin="anonymous";
-        im.onload=()=>{try{ctx.drawImage(im,ox+tx*256,oy+ty*256,256,256)}catch(e){}res();};
+        im.onload=()=>{try{ctx.drawImage(im,ox+tx*256*kk,oy+ty*256*kk,256*kk+0.6,256*kk+0.6)}catch(e){}res();};
         im.onerror=()=>res(); im.src=url;}));
     }
     await Promise.all(jobs);
-    const X=lo=>ox+lon2x(lo)*scale, Y=la=>oy+lat2y(la)*scale;
+    const X=lo=>ox+lon2x(lo)*scale*kk, Y=la=>oy+lat2y(la)*scale*kk;
     const bucket=k=>k<30?"c0":k<60?"c1":k<90?"c2":"c3";
-    const dot=(p,col)=>{ctx.fillStyle=col;ctx.beginPath();
-      ctx.arc(X(p[3]),Y(p[2]),Math.round(W*0.006),0,7);ctx.fill();};
+    const dot=(p,col,r)=>{ctx.fillStyle=col;ctx.beginPath();
+      ctx.arc(X(p[3]),Y(p[2]),Math.round(W*(r||0.005)),0,7);ctx.fill();};
+    const kmPerPx=Math.cos((minLa+maxLa)/2*Math.PI/180)*40075/(scale*kk);
     if(!animate){                    // PNG card: draw the whole speed-coloured track now
-      ctx.lineWidth=Math.max(3,Math.round(W*0.004));ctx.lineJoin="round";ctx.lineCap="round";
+      // decimate to ~2 screen px per drawn segment, averaging speed over the skipped
+      // fixes — thousands of sub-pixel segments overpainting in different colours is
+      // what made the track read as speckled beads instead of a line
+      const minSp=kmPerPx*2, dseg=[];
+      let ax=null,ay=null,acc=0,spd=0,spn=0;
       for(let i=1;i<pos.length;i++){
         const A=pos[i-1],B2=pos[i],dt=B2[0]-A[0];
-        if(dt<=0||dt>GAP)continue;
+        if(dt<=0||dt>GAP){ax=null;acc=0;spd=0;spn=0;continue;}   // gap → break the line
+        if(ax===null){ax=X(A[3]);ay=Y(A[2]);}
         let kmh=(B2[4]||A[4]||0)*3.6;
         if(!kmh)kmh=hav(A[2],A[3],B2[2],B2[3])/(dt/36e5);
-        ctx.strokeStyle=tcfg().speed[bucket(kmh)];
-        ctx.beginPath();ctx.moveTo(X(A[3]),Y(A[2]));ctx.lineTo(X(B2[3]),Y(B2[2]));ctx.stroke();
+        acc+=hav(A[2],A[3],B2[2],B2[3]); spd+=kmh; spn++;
+        if(acc>=minSp||i===pos.length-1){
+          dseg.push([ax,ay,X(B2[3]),Y(B2[2]),spd/spn]);
+          ax=X(B2[3]);ay=Y(B2[2]);acc=0;spd=0;spn=0;
+        }
+      }
+      // moving average over neighbouring segments (not across breaks) → coherent colour
+      // runs instead of a candy-stripe of per-segment buckets
+      const cont=(p2,q2)=>dseg[p2][2]===dseg[q2][0]&&dseg[p2][3]===dseg[q2][1];
+      for(let i=0;i<dseg.length;i++){
+        let s2=dseg[i][4],n=1;
+        for(let j=i-1;j>=Math.max(0,i-3);j--){if(!cont(j,j+1))break;s2+=dseg[j][4];n++;}
+        for(let j=i+1;j<=Math.min(dseg.length-1,i+3);j++){if(!cont(j-1,j))break;s2+=dseg[j][4];n++;}
+        dseg[i][5]=s2/n;
+      }
+      ctx.lineWidth=Math.max(2.5,Math.round(W*0.0032));ctx.lineJoin="round";ctx.lineCap="round";
+      for(const s3 of dseg){
+        ctx.strokeStyle=tcfg().speed[bucket(s3[5])];
+        ctx.beginPath();ctx.moveTo(s3[0],s3[1]);ctx.lineTo(s3[2],s3[3]);ctx.stroke();
       }
       dot(pos[pos.length-1],P.accent);
     }
     dot(pos[0],P.fg);              // start marker (video head is drawn per-frame)
+    // ---- vector place labels (amber = ridden through · light blue = major city · grey = town) ----
+    try{
+      await loadCities();
+      const dayOf2=p=>p[7]||((p[1]||"").slice(0,10));
+      const minPop=Math.max(16,tr.w*kmPerPx*0.22);       // density scales with the visible span
+      const cpts=(CITIES||[]).filter(c=>c[1]>=minLa&&c[1]<=maxLa&&c[2]>=minLo&&c[2]<=maxLo)
+        .map(c=>({name:c[0],pop:c[3],la:c[1],lo:c[2],forced:false,visited:false}));
+      { // force a label at the start/end of the route, every day and every segment break
+        const bnd=new Set([0,pos.length-1]);
+        for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0];
+          if((dt<=0)||(dt>GAP&&hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3])>2)||dayOf2(pos[i])!==dayOf2(pos[i-1])){bnd.add(i);bnd.add(i-1);}}
+        for(const idx of bnd){const la=pos[idx][2],lo=pos[idx][3];let best=null,bd=40;
+          for(const c of cpts){const d=hav(la,lo,c.la,c.lo);if(d<bd){bd=d;best=c;}}
+          if(best)best.forced=true;}
+      }
+      { // towns the route actually rode through (≤4 km) get the amber "visited" colour
+        const step=Math.max(1,Math.floor(pos.length/3000));
+        for(const c of cpts){for(let i=0;i<pos.length;i+=step){if(hav(pos[i][2],pos[i][3],c.la,c.lo)<=4){c.visited=true;break;}}}
+      }
+      const score=c=>(c.forced?1e12:0)+(c.visited?4e11:0)+c.pop;
+      const cand=cpts.filter(c=>c.forced||c.visited||c.pop>=minPop).sort((p2,q2)=>score(q2)-score(p2));
+      const mD=Math.min(tr.w,tr.h);
+      ctx.textAlign="left";ctx.textBaseline="middle";
+      const drawn=[];
+      for(const c of cand){
+        if(drawn.length>=30)break;                       // keep the card clean
+        const sx=X(c.lo),sy=Y(c.la);
+        if(sx<tr.x+8||sx>tr.x+tr.w-10||sy<tr.y+12||sy>tr.y+tr.h-Math.round(W*0.03))continue;
+        const big=c.pop>=220;
+        const fs=Math.round((c.visited?1.25:1)*Math.min(mD*0.030,Math.max(mD*0.016,mD*0.013*(1+Math.log10(Math.max(c.pop,25)/40)))));
+        ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
+        const tw2=ctx.measureText(c.name).width;
+        let dx=sx+fs*0.55, right=false;                  // flip to the left of the dot at the right edge
+        if(dx+tw2>tr.x+tr.w-8){dx=sx-fs*0.55;right=true; if(dx-tw2<tr.x+6)continue;}
+        const rect=right?[dx-tw2-2,sy-fs*0.65,tw2+4,fs*1.3]:[dx-2,sy-fs*0.65,tw2+4,fs*1.3];
+        let ov=false;for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1]){ov=true;break;}}
+        if(ov)continue; drawn.push(rect);
+        const txt=c.visited?"#FFD37A":(big?"#C7E4FF":"#9AA6B4");
+        const dcol=c.visited?"rgba(255,205,110,.95)":(big?"rgba(147,198,255,.9)":"rgba(150,162,178,.8)");
+        ctx.fillStyle=dcol;ctx.beginPath();ctx.arc(sx,sy,Math.max(1.6,fs*0.13),0,7);ctx.fill();
+        ctx.textAlign=right?"right":"left";
+        ctx.fillStyle="rgba(0,0,0,.75)";ctx.fillText(c.name,dx+1.5,sy+1.5);
+        ctx.fillStyle=txt;ctx.fillText(c.name,dx,sy);
+      }
+      ctx.textAlign="left";
+      ctx.textBaseline="top";
+    }catch(e){console.warn("card labels skipped:",e&&e.message);}
     ctx.font=mono(W*0.0085);ctx.fillStyle=P.sub;ctx.textAlign="right";
     ctx.fillText("© OPENSTREETMAP © CARTO",tr.x+tr.w-8,tr.y+tr.h-Math.round(W*0.014));
     ctx.textAlign="left";
@@ -1048,15 +1150,30 @@ function drawCardTrack(ctx,proj,pos,cum,total,frac){
 
 async function shareCard(layout){
   if(!DATA)return;
-  const {pos}=slice();
   const a=$("d1").value,b=$("d2").value;
-  // if this range has already been road-matched, draw the dense matched line (stats are matched too)
-  const drawPos=(MATCHED&&MATCHED.a===a&&MATCHED.b===b&&MATCHED.pos.length>2)?MATCHED.pos:pos;
-  const [W,H]={vertical:[1080,1920],square:[1080,1080],horizontal:[1920,1080]}[layout];
-  const cv=document.createElement("canvas");cv.width=W;cv.height=H;
-  const ctx=cv.getContext("2d");
-  await renderCard(ctx,layout,W,H,drawPos,{track:true});
-  cv.toBlob(async blob=>{
+  const busy=$("flyBusy"),busyTxt=$("flyBusyTxt");
+  const setBusy=t=>{busy.hidden=false;busyTxt.textContent=t;};
+  try{
+    // road-match first so the card draws a dense road-following line, not the blobby
+    // 1/min raw fixes; fallback = raw minus the stationary scatter that knots at stops
+    setBusy("Matching roads…");
+    let drawPos=null;
+    try{const Mm=await ensureMatched(); if(Mm&&Mm.pos.length>2)drawPos=Mm.pos;}catch(e){}
+    const {pos}=slice();
+    if(!drawPos){
+      drawPos=pos.filter(p=>p[6]==="timelinePath"||p[4]>1.5);
+      if(drawPos.length<2)drawPos=pos;
+    }
+    const days=new Set(); for(const p of pos){const d=(p[1]||"").slice(0,10); if(d)days.add(d);}
+    const nDays=days.size||1;
+    let dayWx=null;
+    if(a!==b&&nDays>1){ setBusy("Fetching weather…"); try{dayWx=await getDailyWx(pos,a,b);}catch(e){} }
+    setBusy("Rendering card…");
+    const [W,H]={vertical:[1080,1920],square:[1080,1080],horizontal:[1920,1080]}[layout];
+    const cv=document.createElement("canvas");cv.width=W;cv.height=H;
+    const ctx=cv.getContext("2d");
+    await renderCard(ctx,layout,W,H,drawPos,{track:true,nDays,dayWx});
+    const blob=await new Promise(res=>cv.toBlob(res,"image/png"));
     if(!blob)return;
     const file=new File([blob],`ride-${a}${a!==b?"_"+b:""}-${layout}.png`,{type:"image/png"});
     if(navigator.canShare&&navigator.canShare({files:[file]})){
@@ -1066,7 +1183,7 @@ async function shareCard(layout){
     const u=URL.createObjectURL(blob);
     const el=document.createElement("a");el.href=u;el.download=file.name;el.click();
     setTimeout(()=>URL.revokeObjectURL(u),4000);
-  },"image/png");
+  } finally { busy.hidden=true; }
 }
 document.querySelectorAll(".cardbtn:not(.flybtn)").forEach(b=>b.addEventListener("click",()=>shareCard(b.dataset.layout)));
 
@@ -1236,7 +1353,7 @@ async function matchRoads(){
   if(total<3){btn.textContent="⌖ not enough moving fixes";return;}
   btn.disabled=true;
   try{
-    const shapes=[],speedShapes=[];let done=0;   // speedShapes: matched verts with a speed mapped from the nearest raw fix
+    const shapes=[],speedShapes=[];let done=0,fails=0;   // speedShapes: matched verts with a speed mapped from the nearest raw fix
     for(const run of runs){
       for(let i=0;i<run.length-1;i+=399){ // Valhalla takes big traces; stay polite
         const chunk=run.slice(i,i+400);
@@ -1245,23 +1362,32 @@ async function matchRoads(){
         const body={shape:chunk.map(p=>({lat:+p[2].toFixed(6),lon:+p[3].toFixed(6),time:Math.round(p[0]/1000)})),
                     costing:"motorcycle",shape_match:"map_snap",
                     trace_options:{search_radius:50,interpolation_distance:10}};
-        const r=await fetch("https://valhalla1.openstreetmap.de/trace_route",
-          {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-        if(r.status===429)throw new Error("rate-limited — try again in a minute");
+        // 20 s cap per request — a slow/hung Valhalla degrades that chunk to raw geometry
+        // instead of stalling the whole render (flaky public server / captive-portal WiFi)
         let matchedChunk=false;
-        if(r.ok){
-          const j=await r.json();
-          for(const leg of ((j.trip&&j.trip.legs)||[])){
-            const g=decodePolyline6(leg.shape); shapes.push(g);
-            // map a speed onto each matched vertex from the nearest chunk fix (monotonic walk)
-            let jj=0; const sg=[];
-            for(const v of g){
-              while(jj<chunk.length-1 && hav(v[0],v[1],chunk[jj+1][2],chunk[jj+1][3])<hav(v[0],v[1],chunk[jj][2],chunk[jj][3])) jj++;
-              sg.push([v[0],v[1],chunk[jj][4]||0,(chunk[jj][1]||"").slice(0,10)]);   // carry the real day
+        const ac=new AbortController(), tt=setTimeout(()=>ac.abort(),20000);
+        try{
+          const r=await fetch("https://valhalla1.openstreetmap.de/trace_route",
+            {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:ac.signal});
+          if(r.status===429)throw new Error("rate-limited — try again in a minute");
+          if(r.ok){
+            const j=await r.json();
+            for(const leg of ((j.trip&&j.trip.legs)||[])){
+              const g=decodePolyline6(leg.shape); shapes.push(g);
+              // map a speed onto each matched vertex from the nearest chunk fix (monotonic walk)
+              let jj=0; const sg=[];
+              for(const v of g){
+                while(jj<chunk.length-1 && hav(v[0],v[1],chunk[jj+1][2],chunk[jj+1][3])<hav(v[0],v[1],chunk[jj][2],chunk[jj][3])) jj++;
+                sg.push([v[0],v[1],chunk[jj][4]||0,(chunk[jj][1]||"").slice(0,10)]);   // carry the real day
+              }
+              speedShapes.push(sg); matchedChunk=true;
             }
-            speedShapes.push(sg); matchedChunk=true;
           }
-        }
+          fails=0;   // the server answered (even a non-OK counts as alive)
+        }catch(e){
+          if(/rate-limited/.test(e&&e.message||""))throw e;
+          if(++fails>=3)throw new Error("road-match server not responding");   // give up fast → caller falls back to raw
+        }finally{clearTimeout(tt);}
         // a chunk that wouldn't match (tunnels, off-road, GPS drift) → keep the raw geometry so the
         // drawn line stays continuous (it just isn't counted in the matched stats)
         if(!matchedChunk) speedShapes.push(chunk.map(p=>[p[2],p[3],p[4]||0,(p[1]||"").slice(0,10)]));
@@ -2037,10 +2163,19 @@ async function fetchDailyWeather(rawpos){
     const code=+Object.keys(codes).sort((x,y)=>codes[y]-codes[x]||y-x)[0]||0, [icon,desc]=wmo(code);
     const rain=pr<0.1?"dry":(wimp?(pr/25.4).toFixed(2)+'" rain':pr.toFixed(1)+" mm rain");
     const dl=new Date(day+"T12:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}).toUpperCase();
-    map[day]={line:`${dl} · ${icon} ${desc.toUpperCase()} · ${T(tavg)} · ${rain}`};
+    map[day]={line:`${dl} · ${icon} ${desc.toUpperCase()} · ${T(tavg)} · ${rain}`,
+              icon,t:Math.round(wimp?tavg*9/5+32:tavg)};   // icon+temp reused by the ride-card weather strip
     await new Promise(r=>setTimeout(r,120));   // gentle with N per-day calls
   }
   return map;
+}
+// cached per-range daily weather (card + flythrough share one fetch; invalidated on range/unit change)
+let DAYWX=null;
+async function getDailyWx(rawpos,a,b){
+  if(DAYWX&&DAYWX.a===a&&DAYWX.b===b&&DAYWX.u===wxUnit)return DAYWX.map;
+  const m=await fetchDailyWeather(rawpos);
+  if(m)DAYWX={a,b,u:wxUnit,map:m};
+  return m;
 }
 
 // ---- rally roadbook pace-notes (from geometry; works without map-matching) ----
@@ -2100,6 +2235,7 @@ async function flythrough(layout){
   layout=layout||"horizontal"; const horiz=layout==="horizontal", vert=layout==="vertical";
   const {pos:rawpos,a,b}=slice();
   if(rawpos.length<3)return;
+  const nDaysF=(()=>{const s=new Set();for(const p of rawpos){const d=(p[1]||"").slice(0,10);if(d)s.add(d);}return s.size||1;})();
   const mime=pickVideoMime();
   const busy=$("flyBusy"),busyTxt=$("flyBusyTxt"),flybtns=[...document.querySelectorAll(".flybtn")];
   const setBusy=t=>{busy.hidden=false;busyTxt.textContent=t;};
@@ -2112,7 +2248,7 @@ async function flythrough(layout){
   const pos=thinFly(src);
   const dayOf=p=>p[7]||(p[1]&&String(p[1]).slice(0,10))||a;
   let dayWx=null;   // per-day weather for multi-day rides → cross-faded as the head crosses days
-  if(a!==b){ setBusy("Fetching weather…"); try{ dayWx=await fetchDailyWeather(rawpos);}catch(e){} }
+  if(a!==b){ setBusy("Fetching weather…"); try{ dayWx=await getDailyWx(rawpos,a,b);}catch(e){} }
   const [W,H]={vertical:[1080,1920],square:[1080,1080],horizontal:[1920,1080]}[layout], P=tcfg().card;
   setBusy("Rendering video…");
   try{await document.fonts.ready;}catch(e){}
@@ -2165,7 +2301,7 @@ async function flythrough(layout){
   // major cities within the view, in world px — drawn as crisp vector labels, filtered/faded by zoom
   const kmPerPx=Math.cos((minLa+maxLa)/2*Math.PI/180)*40075/scale;
   const cityPts=(CITIES||[]).filter(c=>c[1]>=minLa-0.8&&c[1]<=maxLa+0.8&&c[2]>=minLo-1.0&&c[2]<=maxLo+1.0)
-    .map(c=>({name:c[0],pop:c[3],la:c[1],lo:c[2],wx:lon2x(c[2])*scale,wy:lat2y(c[1])*scale,forced:false}));
+    .map(c=>({name:c[0],pop:c[3],la:c[1],lo:c[2],wx:lon2x(c[2])*scale,wy:lat2y(c[1])*scale,forced:false,visited:false}));
   // ---- route in world px + cumulative distance (constant-speed reveal) ----
   const WPT=pos.map(p=>[lon2x(p[3])*scale,lat2y(p[2])*scale]);
   // a segment only "breaks" the line if it's a long time gap AND the bike actually moved far
@@ -2185,12 +2321,18 @@ async function flythrough(layout){
       for(const c of cityPts){ const d=hav(la,lo,c.la,c.lo); if(d<bd){bd=d;best=c;} }
       if(best)best.forced=true; }
   }
+  // mark cities the route actually rode THROUGH (~≤4 km from the track) — these get the amber
+  // "visited" colour and are enlarged on the overview. Geo-agnostic: works for any route/country.
+  // Track is sampled at a capped stride so this stays fast even on very dense raw exports.
+  { const step=Math.max(1,Math.floor(pos.length/4000));
+    for(const c of cityPts){ for(let i=0;i<pos.length;i+=step){ if(hav(pos[i][2],pos[i][3],c.la,c.lo)<=4){c.visited=true;break;} } }
+  }
   const headWorld=r=>{for(let i=1;i<pos.length;i++){if(cum[i]>=r){const f=(r-cum[i-1])/((cum[i]-cum[i-1])||1);
     return [WPT[i-1][0]+(WPT[i][0]-WPT[i-1][0])*f, WPT[i-1][1]+(WPT[i][1]-WPT[i-1][1])*f];}} return WPT[WPT.length-1];};
   // (kOver / kDetail / clr / kEnd computed above, before the overview-fill tile fetch)
   // ---- overlay content (full stat set, "as per the PNGs") ----
   // labels static; values count up with the reveal (scaled from the final matched/raw stats)
-  const LBL=[$("kKm").textContent,"moving time",$("kAvg").textContent,$("kMax").textContent,$("kClimb").textContent,"bends"];
+  const LBL=[$("kKm").textContent,"moving time",$("kAvg").textContent,$("kMax").textContent,$("kClimb").textContent,"bends (L/R)"];
   const kmF=STATS.km||0,moveF=STATS.moveMs||0,avgF=STATS.avg||0,maxF=STATS.max||0,climbF=STATS.climb||0,
         bF=STATS.bends||0,lF=STATS.bendL||0,rF=STATS.bendR||0;
   const runMax=[0]; for(let i=1;i<pos.length;i++)runMax[i]=Math.max(runMax[i-1],(pos[i][4]||0)*3.6);
@@ -2213,7 +2355,13 @@ async function flythrough(layout){
     const hFs=horiz?W*0.014:W*0.02, dFs=horiz?W*0.033:W*0.038;
     ctx.fillStyle=P.accent;ctx.font=mono(hFs);ctx.fillText("TIMELINE ROADBOOK",M,M);
     if(rider){ctx.textAlign="right";ctx.fillStyle="#fff";ctx.font=mono(hFs);ctx.fillText(rider.toUpperCase(),W-M,M);ctx.textAlign="left";}
-    ctx.fillStyle="#fff";ctx.font=cond(800,dFs);ctx.fillText(a===b?dfmt(a):dfmt(a)+" — "+dfmt(b),M,M+hFs*1.5);
+    const dStr=a===b?dfmt(a):dfmt(a)+" — "+dfmt(b);
+    ctx.fillStyle="#fff";ctx.font=cond(800,dFs);ctx.fillText(dStr,M,M+hFs*1.5);
+    if(nDaysF>1){                     // multi-day ride → say how many days, right of the date
+      const dw=ctx.measureText(dStr).width, cFs=hFs*1.1;
+      ctx.fillStyle=P.accent;ctx.font=mono(cFs);
+      ctx.fillText(`${nDaysF} DAYS`,M+dw+W*0.012,M+hFs*1.5+(dFs-cFs)*0.58);
+    }
     if(wxLine){ctx.save();ctx.globalAlpha=Math.max(0,Math.min(1,wxAlpha));ctx.fillStyle="rgba(255,255,255,.85)";ctx.font=mono(hFs*0.95);ctx.fillText(wxLine,M,M+hFs*1.5+dFs*1.2);ctx.restore();}
     if(horiz){
       // widescreen: translucent right column, stats stacked
@@ -2267,26 +2415,41 @@ async function flythrough(layout){
     // text grows toward detail (up to 1.5×) while the overview scale stays as-is
     const zt=Math.max(0,Math.min(1,(k-kOver)/((kDetail-kOver)||1))), sizeMul=1+0.5*zt;
     const yMax=horiz?H*0.97:H*0.60, xMax=horiz?W*0.68:W*0.97;   // keep out of the stat panel
-    // candidate labels this frame; resolve overlaps by a STABLE score so a label shown last frame
-    // keeps its slot (no blink as the camera pans) — but stickiness is only a 1.4× pop boost, so a
-    // small town can never block a bigger city (e.g. a suburb hiding Madrid). Forced always win.
-    const score=c=>(c.forced?1e12:0)+c.pop*(cityShown.has(c.name)?1.4:1);
-    const cand=cityPts.filter(c=>c.forced||c.pop>=minPop).sort((p,q)=>score(q)-score(p));
+    // candidates: forced day/segment endpoints + towns the route passed through (.visited) + any
+    // city above the zoom threshold. Resolve overlaps by a STABLE score so a label shown last frame
+    // keeps its slot — stickiness is only a 1.4× pop boost, so a small town can never block a bigger
+    // city (a suburb can't hide Madrid). forced win outright, then visited, then population.
+    const score=c=>(c.forced?1e12:0)+(c.visited?4e11:0)+c.pop*(cityShown.has(c.name)?1.4:1);
+    const cand=cityPts.filter(c=>c.forced||c.visited||c.pop>=minPop).sort((p,q)=>score(q)-score(p));
     ctx.textAlign="left"; ctx.textBaseline="middle"; const drawn=[], now=new Set();
+    // asymmetric hysteresis: a label only STARTS showing once comfortably inside the frame, then is
+    // KEPT until it drifts well past the edge — a wide dead-band so a town teetering on the boundary
+    // (as the follow-cam wobbles on twisty sections) can't blink on and off.
+    const app=W*0.05, keep=W*0.10;
     for(const c of cand){
-      const sx=(c.wx-cwx)*k+scx, sy=(c.wy-cwy)*k+scy;
-      if(sx<-40||sx>xMax||sy<H*0.02||sy>yMax)continue;
-      const fs=Math.round(sizeMul*Math.min(W*0.024,Math.max(W*0.0125,W*0.0085*(1+Math.log10(Math.max(c.pop,25)/40)))));
+      const sx=(c.wx-cwx)*k+scx, sy=(c.wy-cwy)*k+scy, on=cityShown.has(c.name);
+      const xLo=on?-40-keep:W*0.012, xHi=on?xMax+keep:xMax-app;
+      const yLo=on?H*0.02-keep:H*0.02+app, yHi=on?yMax+keep:yMax-app;
+      if(sx<xLo||sx>xHi||sy<yLo||sy>yHi)continue;
+      const vMul=c.visited?1+0.5*(1-zt):1;   // visited towns 1.5× on the overview, tapering to 1× at detail
+      const fs=Math.round(sizeMul*vMul*Math.min(W*0.028,Math.max(W*0.0125,W*0.0085*(1+Math.log10(Math.max(c.pop,25)/40)))));
       ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
-      const tw=ctx.measureText(c.name).width, dx=sx+fs*0.55, rect=[dx-2,sy-fs*0.65,tw+4,fs*1.3];
+      const tw=ctx.measureText(c.name).width;
+      let dx=sx+fs*0.55, rAl=false;           // flip to the left of the dot at the right edge
+      if(dx+tw>xMax-4){dx=sx-fs*0.55;rAl=true; if(dx-tw<4)continue;}
+      const rect=rAl?[dx-tw-2,sy-fs*0.65,tw+4,fs*1.3]:[dx-2,sy-fs*0.65,tw+4,fs*1.3];
       let ov=false; for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1]){ov=true;break;}}
       if(ov)continue; drawn.push(rect); now.add(c.name);
-      const big=c.pop>=BIGPOP, txt=big?"#C7E4FF":"#9AA6B4", dot=big?"rgba(147,198,255,.9)":"rgba(150,162,178,.8)";
+      // visited = amber (you rode through it) · major city = light blue · other town = grey
+      const big=c.pop>=BIGPOP;
+      const txt=c.visited?"#FFD37A":(big?"#C7E4FF":"#9AA6B4");
+      const dot=c.visited?"rgba(255,205,110,.95)":(big?"rgba(147,198,255,.9)":"rgba(150,162,178,.8)");
       ctx.fillStyle=dot;ctx.beginPath();ctx.arc(sx,sy,Math.max(1.6,fs*0.13),0,7);ctx.fill();
+      ctx.textAlign=rAl?"right":"left";
       ctx.fillStyle="rgba(0,0,0,.75)";ctx.fillText(c.name,dx+1.5,sy+1.5);
       ctx.fillStyle=txt;ctx.fillText(c.name,dx,sy);
     }
-    cityShown=now; ctx.textBaseline="top";
+    cityShown=now; ctx.textAlign="left"; ctx.textBaseline="top";
   }
   // ---- record ----
   const cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
@@ -2306,7 +2469,7 @@ async function flythrough(layout){
   // glides to a stop before the zoom-out (no speed jump; area under the curve = 1)
   const RC=0.72, RV=2/(1+RC);
   const revealFrac=p=>{if(p<=RC)return RV*p;const u=p-RC;return RV*RC+RV*(u-u*u/(2*(1-RC)));};
-  let camX=null,camY=null,snap=null; const SMOOTH=total>700?0.07:0.11;   // gentler follow-cam pan on longer routes
+  let camX=null,camY=null,snap=null; const SMOOTH=total>700?0.05:0.10;   // gentler follow-cam pan on longer routes (less edge wobble)
   let shownDay=null,fadeStart=-1; const WXFADE=700;   // per-day weather cross-fade state
   function frame(){
     const el=performance.now()-t0; let frac,k,cwx,cwy,scx=W/2,scy=H/2;
