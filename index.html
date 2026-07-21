@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.12";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.13";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -2558,11 +2558,12 @@ async function flythrough(layout){
   try{const stream=cv.captureStream(30); rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:16e6});
   }catch(e){setBusy("Recorder failed");setTimeout(endBusy,2000);return;}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
-  const done=new Promise(res=>rec.onstop=res); rec.start(1000);   // timeslice so the tail isn't dropped
+  const done=new Promise(res=>rec.onstop=res);   // (recorder started after the warm-up below)
   // animation length scales with ride distance so the reveal speed stays sane (a 400 km day ≈ 11 s,
   // clamped so short rides aren't too quick and whole-tour ranges aren't endless)
   const DRAW=Math.round(Math.min(34000,Math.max(12000,total*70)));   // ~2.5× slower reveal than before
-  const SETTLE=500, ZOUT=3000, HOLD=(horiz||vert)?3700:1700, t0=performance.now();   // longer read time on the overview
+  const SETTLE=500, ZOUT=3000, HOLD=(horiz||vert)?3700:1700;   // longer read time on the overview
+  let t0=performance.now(), warm=true;   // t0 reset after the warm-up pass
   setBusy("Rendering video…");
   const easeIO=e=>e<.5?2*e*e:1-((-2*e+2)**2)/2;
   // reveal velocity: constant for the first C of the draw, then ramps to 0 → the line
@@ -2630,8 +2631,17 @@ async function flythrough(layout){
     }
     overlay(frac,ri,wxLine,wxAlpha);
     busyTxt.textContent="Rendering video… "+Math.min(99,Math.round(el/(DRAW+SETTLE+ZOUT+HOLD)*100))+"%";
+    if(warm)return;   // warm-up paint: no scheduling, recorder not yet running
     if(el<DRAW+SETTLE+ZOUT+HOLD)requestAnimationFrame(frame); else setTimeout(()=>{try{rec.stop()}catch(e){}},250);
   }
+  // ---- warm-up: force-decode every tile and JIT-warm the full frame path BEFORE the
+  // recorder starts — image decode used to land on the first recorded frames (start stutter)
+  {const wc=document.createElement("canvas");wc.width=8;wc.height=8;const wctx=wc.getContext("2d");
+   for(const t of otiles)try{wctx.drawImage(t.im,0,0,8,8)}catch(e){}
+   for(const t of tiles)try{wctx.drawImage(t.im,0,0,8,8)}catch(e){}}
+  frame(); frame();          // two dry paints of the opening view
+  warm=false; rec.start(1000);   // timeslice so the tail isn't dropped
+  t0=performance.now();
   requestAnimationFrame(frame);
   await done;
   const ext=mime.indexOf("mp4")>=0?"mp4":"webm";
