@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.8";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.9";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -864,21 +864,41 @@ available (WhatsApp etc. on mobile); otherwise downloads the PNG.
 // Dash-livery carbon-fibre twill + black top fade, drawn onto the ride card so the
 // PNG matches the page background. Map tiles paint over it; weave reads in the margins.
 function drawCarbon(ctx,W,H){
-  const t=Math.max(7,Math.round(W/135));                 // ~8px weave @1080, scales with card
-  const tile=document.createElement("canvas");tile.width=tile.height=t*2;
-  const tx=tile.getContext("2d");
-  const base="#0a0c0f",dark="#050607",light="#2b3138";
-  tx.fillStyle=base;tx.fillRect(0,0,t*2,t*2);
-  const cell=(px,py,dir)=>{                               // diagonal strand per cell, alternating = twill
-    const g=dir>0?tx.createLinearGradient(px,py+t,px+t,py):tx.createLinearGradient(px,py,px+t,py+t);
-    g.addColorStop(0,light);g.addColorStop(.5,dark);g.addColorStop(1,light);
-    tx.fillStyle=g;tx.fillRect(px,py,t,t);
-  };
-  cell(0,0,1);cell(t,0,-1);cell(0,t,-1);cell(t,t,1);
-  ctx.save();ctx.fillStyle=ctx.createPattern(tile,"repeat");ctx.fillRect(0,0,W,H);ctx.restore();
-  const fade=ctx.createLinearGradient(0,0,0,H*0.5);       // opens black up top, weave fades in below
-  fade.addColorStop(0,"#000");fade.addColorStop(1,"rgba(0,0,0,0)");
-  ctx.fillStyle=fade;ctx.fillRect(0,0,W,H*0.5);
+  // exact replica of the site's body::before weave: the same six CSS gradient layers
+  // evaluated per-pixel on a 15px tile, then painted rotated 45° like the page background
+  const s=Math.max(2,Math.round(W/540)), T=15*s;
+  const tile=document.createElement("canvas");tile.width=tile.height=T;
+  const tx=tile.getContext("2d"), img=tx.createImageData(T,T);
+  const hex=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+  // hard-stop diagonal strand: colour where the projection onto the gradient axis ≤ 3.75 css px
+  const diag=(A,col,ox2,oy2)=>{const r=A*Math.PI/180,dx=Math.sin(r),dy=-Math.cos(r);
+    const L=15*(Math.abs(dx)+Math.abs(dy)),Sx=7.5-dx*L/2,Sy=7.5-dy*L/2;
+    return (u,v)=>{const uu=((u-ox2)%15+15)%15,vv=((v-oy2)%15+15)%15;
+      return ((uu-Sx)*dx+(vv-Sy)*dy)<=3.75?col:null;};};
+  const c1a=hex("#1a1e24"),c05=hex("#050607"),c27=hex("#272c33"),c0a=hex("#0a0c0f"),
+        c2b=hex("#2b3138"),c00=hex("#000000"),bg=hex("#060708");
+  const L6=(u,v)=>{const vv=((v%15)+15)%15;return vv<3.75?c1a:vv<7.5?c05:vv<11.25?null:c27;};
+  const L5=(u,v)=>(((u%15)+15)%15)<7.5?c0a:null;
+  const L4=diag(207,c2b,7.5,3.75), L3=diag(27,c2b,0,7.5),
+        L2=diag(207,c00,7.5,0),  L1=diag(27,c00,0,3.75);
+  for(let y=0;y<T;y++)for(let x=0;x<T;x++){
+    const u=x/s,v=y/s;   // CSS paints its first layer on top → test top-down
+    const c=L1(u,v)||L2(u,v)||L3(u,v)||L4(u,v)||L5(u,v)||L6(u,v)||bg;
+    const i=(y*T+x)*4; img.data[i]=c[0];img.data[i+1]=c[1];img.data[i+2]=c[2];img.data[i+3]=255;
+  }
+  tx.putImageData(img,0,0);
+  ctx.save();ctx.fillStyle="#060708";ctx.fillRect(0,0,W,H);
+  ctx.translate(W/2,H/2);ctx.rotate(Math.PI/4);
+  ctx.fillStyle=ctx.createPattern(tile,"repeat");
+  const R=Math.hypot(W,H);ctx.fillRect(-R,-R,2*R,2*R);ctx.restore();
+  // black fades over the background at top AND bottom (site body::after look, mirrored
+  // below so the stat block sits on black rather than raw weave)
+  const top=ctx.createLinearGradient(0,0,0,H*0.7);
+  top.addColorStop(0,"#000");top.addColorStop(0.2,"rgba(0,0,0,.9)");top.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=top;ctx.fillRect(0,0,W,H*0.7);
+  const bot=ctx.createLinearGradient(0,H,0,H*0.5);
+  bot.addColorStop(0,"#000");bot.addColorStop(0.2,"rgba(0,0,0,.9)");bot.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=bot;ctx.fillRect(0,H*0.5,W,H*0.5);
 }
 // Static card renderer used by BOTH the PNG cards and the flythrough video.
 // opts.track===false → draw everything except the animated track (tiles/stats/header
@@ -954,7 +974,7 @@ async function renderCard(ctx, layout, W, H, pos, opts){
   {let line=""; for(const w of twFull.split(" ")){const t=line?line+" "+w:w;
     if(ctx.measureText(t).width>twW&&line){twLines.push(line);line=w;}else line=t;} if(line)twLines.push(line);}
   const twH=twPad+twVfs*1.15+twLines.length*kFs*1.5;   // height of the twistiness banner body
-  let cells,twX,twY,tr,proj=null,mapFade=0;
+  let cells,twX,twY,tr,proj=null;
   if(horiz){
     // widescreen: big map on the left, metric column on the right spread to full height
     tr={x:M,y:headH,w:mapW,h:H-headH-M};
@@ -967,13 +987,10 @@ async function renderCard(ctx, layout, W, H, pos, opts){
     const cols=layout==="vertical"?2:3;
     const rowH=Math.round(labOff+kFs+W*0.03);
     const nRows=Math.ceil(S.length/cols);
-    const statsTwGap=Math.round(W*0.012);
+    const mapStatsGap=Math.round(W*0.03), statsTwGap=Math.round(W*0.012);
     const bottomH=nRows*rowH+statsTwGap+twH;
-    const gy=H-M-bottomH;                              // stats block anchored to the card bottom
-    const ov=Math.round(H*0.065);                      // map runs on under the stats a little…
-    mapFade=ov+Math.round(H*0.10);                     // …behind a bottom fade the stats sit on
-    tr={x:M,y:headH,w:W-2*M,h:gy-headH+ov};
-    const cw=(W-2*M)/cols;
+    tr={x:M,y:headH,w:W-2*M,h:H-M-headH-mapStatsGap-bottomH};
+    const cw=(W-2*M)/cols, gy=tr.y+tr.h+mapStatsGap;
     cells=S.map((s2,i)=>({s:s2,x:M+(i%cols)*cw,y:gy+Math.floor(i/cols)*rowH}));
     twX=M;twY=gy+nRows*rowH+statsTwGap;
   }
@@ -1000,11 +1017,9 @@ async function renderCard(ctx, layout, W, H, pos, opts){
     while(z>4&&tileCount(z)>320)z--;
     const scale=2**z*256;
     const spanX=(lon2x(maxLo)-lon2x(minLo))*scale||1, spanY=(lat2y(minLa)-lat2y(maxLa))*scale||1;
-    // route fits the VISIBLE part of the region (above the bottom fade); tiles still fill all of it
-    const fitH=mapFade?tr.h-Math.round(mapFade*0.7):tr.h;
-    const kk=Math.min(tr.w/spanX,fitH/spanY);            // fills the region (bbox pad is the margin)
+    const kk=Math.min(tr.w/spanX,tr.h/spanY);            // fills the region (bbox pad is the margin)
     const cx=(lon2x(minLo)+lon2x(maxLo))/2*scale, cy=(lat2y(maxLa)+lat2y(minLa))/2*scale;
-    const ox=tr.x+tr.w/2-cx*kk, oy=tr.y+fitH/2-cy*kk;
+    const ox=tr.x+tr.w/2-cx*kk, oy=tr.y+tr.h/2-cy*kk;
     ctx.save();ctx.beginPath();ctx.rect(tr.x,tr.y,tr.w,tr.h);ctx.clip();
     const tx0=Math.floor(((tr.x-ox)/kk)/256),tx1=Math.floor(((tr.x+tr.w-ox)/kk)/256);
     const ty0=Math.floor(((tr.y-oy)/kk)/256),ty1=Math.floor(((tr.y+tr.h-oy)/kk)/256);
@@ -1086,7 +1101,7 @@ async function renderCard(ctx, layout, W, H, pos, opts){
       const mD=Math.min(tr.w,tr.h);
       ctx.textAlign="left";ctx.textBaseline="middle";
       const drawn=[];
-      const yCut=mapFade?Math.round(mapFade*0.75):Math.round(W*0.03);   // stay clear of the bottom fade
+      const yCut=Math.round(W*0.015);   // slim edge margin — a route hugging the frame edge still labels
       for(const c of cand){
         if(drawn.length>=40)break;                       // keep the card clean
         const sx=X(c.lo),sy=Y(c.la);
@@ -1095,13 +1110,18 @@ async function renderCard(ctx, layout, W, H, pos, opts){
         const fs=Math.round((c.visited?1.25:1)*Math.min(mD*0.030,Math.max(mD*0.016,mD*0.013*(1+Math.log10(Math.max(c.pop,25)/40)))));
         ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
         const tw2=ctx.measureText(c.name).width;
-        let dx=sx+fs*0.55, right=false;                  // flip to the left of the dot at the right edge
-        if(dx+tw2>tr.x+tr.w-8){dx=sx-fs*0.55;right=true; if(dx-tw2<tr.x+6)continue;}
-        // collision rect spans dot AND text so a neighbour can't cram against the marker
-        const rL=right?dx-tw2-2:sx-fs*0.35, rR=right?sx+fs*0.35:dx+tw2+2;
-        const rect=[rL,sy-fs*0.65,rR-rL,fs*1.3];
-        let ov=false;for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1]){ov=true;break;}}
-        if(ov)continue; drawn.push(rect);
+        // try text right of the dot, then left — a static card can pick whichever side is free
+        const mk=(right)=>{const dx2=right?sx-fs*0.55:sx+fs*0.55;
+          if(right&&dx2-tw2<tr.x+6)return null;
+          if(!right&&dx2+tw2>tr.x+tr.w-8)return null;
+          const rL=right?dx2-tw2-2:sx-fs*0.35, rR=right?sx+fs*0.35:dx2+tw2+2;
+          const rect=[rL,sy-fs*0.65,rR-rL,fs*1.3];
+          for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1])return null;}
+          return {dx:dx2,rect,right};};
+        const pick=mk(false)||mk(true);
+        if(!pick)continue;
+        const dx=pick.dx, right=pick.right;
+        drawn.push(pick.rect);
         const txt=c.visited?"#FFD37A":(big?"#C7E4FF":"#9AA6B4");
         const dcol=c.visited?"rgba(255,205,110,.95)":(big?"rgba(147,198,255,.9)":"rgba(150,162,178,.8)");
         ctx.fillStyle=dcol;ctx.beginPath();ctx.arc(sx,sy,Math.max(1.6,fs*0.13),0,7);ctx.fill();
@@ -1112,25 +1132,11 @@ async function renderCard(ctx, layout, W, H, pos, opts){
       ctx.textAlign="left";
       ctx.textBaseline="top";
     }catch(e){console.warn("card labels skipped:",e&&e.message);}
-    if(mapFade){   // vertical/square: map fades into the card bottom so the stats sit on it
-      const h2=P.bg.replace("#",""), n2=parseInt(h2.length===3?h2.split("").map(c2=>c2+c2).join(""):h2,16);
-      const rgb=`${n2>>16&255},${n2>>8&255},${n2&255}`;
-      const g2=ctx.createLinearGradient(0,tr.y+tr.h-mapFade,0,tr.y+tr.h-mapFade*0.3);
-      g2.addColorStop(0,`rgba(${rgb},0)`);g2.addColorStop(1,`rgba(${rgb},1)`);
-      ctx.fillStyle=g2;ctx.fillRect(tr.x,tr.y+tr.h-mapFade,tr.w,mapFade);
-    }
-    if(horiz){
-      ctx.font=mono(W*0.0085);ctx.fillStyle=P.sub;ctx.textAlign="right";
-      ctx.fillText("© OPENSTREETMAP © CARTO",tr.x+tr.w-8,tr.y+tr.h-Math.round(W*0.014));
-      ctx.textAlign="left";
-    }
+    ctx.font=mono(W*0.0085);ctx.fillStyle=P.sub;ctx.textAlign="right";
+    ctx.fillText("© OPENSTREETMAP © CARTO",tr.x+tr.w-8,tr.y+tr.h-Math.round(W*0.014));
+    ctx.textAlign="left";
     ctx.restore();
-    if(horiz){ctx.strokeStyle=P.grid;ctx.lineWidth=2;ctx.strokeRect(tr.x,tr.y,tr.w,tr.h);}
-    else{   // full-bleed map (no border) → attribution at the very bottom-right of the card
-      ctx.font=mono(W*0.0085);ctx.fillStyle=P.sub;ctx.textAlign="right";ctx.textBaseline="bottom";
-      ctx.fillText("© OPENSTREETMAP © CARTO",W-Math.round(W*0.012),H-Math.round(W*0.009));
-      ctx.textAlign="left";ctx.textBaseline="top";
-    }
+    ctx.strokeStyle=P.grid;ctx.lineWidth=2;ctx.strokeRect(tr.x,tr.y,tr.w,tr.h);
     proj={X,Y,bucket,tr,P,W};        // hand projection to the animated track pass
   }
   // ---- stats grid (geometry computed above; draw the metric cells) ----
@@ -2444,6 +2450,7 @@ async function flythrough(layout){
     const zt=Math.max(0,Math.min(1,(k-kOver)/((kDetail-kOver)||1))), sizeMul=1+0.5*zt;
     const yMax=horiz?H*0.97:H*0.62, xMax=horiz?W*0.68:W*0.97;   // keep out of the stat panel
     const nowT=performance.now();
+    const dbgL=window.__LABLOG?[]:null;   // per-frame label telemetry for headless analysis
     // candidates: forced day/segment endpoints + towns the route passed through (.visited) + any
     // city above the zoom threshold. Resolve overlaps by a STABLE score so a label shown last frame
     // keeps its slot — stickiness is only a 1.4× pop boost, so a small town can never block a bigger
@@ -2460,15 +2467,22 @@ async function flythrough(layout){
       const xLo=on?-40-keep:W*0.012, xHi=on?xMax+keep:xMax-app;
       const yLo=on?yTop-keep:yTop+app, yHi=on?yMax+keep:yMax-app;
       if(sx<xLo||sx>xHi||sy<yLo||sy>yHi)continue;
-      const vMul=c.visited?1+0.5*(1-zt):1;   // visited towns 1.5× on the overview, tapering to 1× at detail
+      // visited towns 1.35× everywhere — the old zt-dependent boost made visited labels GROW
+      // during the zoom-out while everything else shrank, which read as random rescaling
+      const vMul=c.visited?1.35:1;
       const fs=Math.round(sizeMul*vMul*Math.min(W*0.028,Math.max(W*0.0125,W*0.0085*(1+Math.log10(Math.max(c.pop,25)/40)))));
       ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
       const tw=ctx.measureText(c.name).width;
-      // side of the dot is decided ONCE per shown streak and kept — recomputing per frame
-      // made edge labels jump left/right of their dot as the camera panned
-      let rAl=on&&citySide.has(c.name)?citySide.get(c.name):(sx+fs*0.55+tw>xMax-4);
+      // side of the dot is sticky for the WHOLE render (telemetry showed per-streak stickiness
+      // still flipped 16 labels mid-life). During the draw phase a label that would need to
+      // flip is culled instead (it's drifting out anyway — a flip reads as a jump); during the
+      // zoom-out one permanent flip is allowed so edge labels land readable in the overview.
+      let rAl=citySide.has(c.name)?citySide.get(c.name):(sx+fs*0.55+tw>xMax-4);
       let dx=rAl?sx-fs*0.55:sx+fs*0.55;
-      if(!rAl&&dx+tw>xMax-4){rAl=true;dx=sx-fs*0.55;}   // fresh label that would clip → flip left
+      if(!rAl&&dx+tw>xMax-4){
+        if(zt>0.9)continue;                     // draw phase → let it slide out, no jump
+        rAl=true;dx=sx-fs*0.55;                 // zoom-out → flip once, stays flipped
+      }
       if(rAl&&dx-tw<4)continue;
       // collision rect spans dot AND text so a neighbour can't cram against the marker
       const rL=rAl?dx-tw-2:sx-fs*0.35, rR=rAl?sx+fs*0.35:dx+tw+2;
@@ -2487,8 +2501,11 @@ async function flythrough(layout){
       ctx.fillStyle="rgba(0,0,0,.75)";ctx.fillText(c.name,dx+1.5,sy+1.5);
       ctx.fillStyle=txt;ctx.fillText(c.name,dx,sy);
       ctx.restore();
+      if(dbgL)dbgL.push([c.name,Math.round(sx),Math.round(sy),fs,+fadeA.toFixed(2),rAl?1:0]);
     }
-    for(const n of [...cityBorn.keys()])if(!now.has(n)){cityBorn.delete(n);citySide.delete(n);}
+    if(dbgL)window.__LABLOG.push({t:Math.round(nowT),k:+k.toFixed(5),l:dbgL});
+    // born/side persist for the whole render: a town re-entering at the zoom-out appears
+    // instantly at its remembered side — deleting them made all 32 revisited labels re-fade
     cityShown=now; ctx.textAlign="left"; ctx.textBaseline="top";
   }
   // ---- record ----
@@ -2536,11 +2553,16 @@ async function flythrough(layout){
     for(const t of tiles){ if(t.x+257<vx0||t.x>vx1||t.y+257<vy0||t.y>vy1)continue; ctx.drawImage(t.im,t.x,t.y,257,257); }   // …sharp detail tiles
     ctx.lineWidth=(W*0.0034)/k; ctx.lineJoin="round"; ctx.lineCap="round";
     const reveal=frac*total;
+    const cm=64/k;   // cull margin in world px
     for(let i=1;i<pos.length;i++){ if(brk[i])continue; if(cum[i-1]>=reveal)break;
+      const A=WPT[i-1]; let bx=WPT[i][0],by=WPT[i][1];
+      // skip segments wholly outside the camera — at detail zoom that's most of the
+      // revealed line, and per-segment strokes were what dragged headless below 30 fps
+      const part=cum[i]>reveal;
+      if(!part&&((A[0]<vx0-cm&&bx<vx0-cm)||(A[0]>vx1+cm&&bx>vx1+cm)||(A[1]<vy0-cm&&by<vy0-cm)||(A[1]>vy1+cm&&by>vy1+cm)))continue;
       let kmh=(pos[i][4]||pos[i-1][4]||0)*3.6; if(!kmh)kmh=segd[i]/((pos[i][0]-pos[i-1][0])/36e5);
       ctx.strokeStyle=tcfg().speed[bucket(kmh)];
-      const A=WPT[i-1]; let bx=WPT[i][0],by=WPT[i][1];
-      if(cum[i]>reveal){const f=(reveal-cum[i-1])/((cum[i]-cum[i-1])||1);bx=A[0]+(bx-A[0])*f;by=A[1]+(by-A[1])*f;
+      if(part){const f=(reveal-cum[i-1])/((cum[i]-cum[i-1])||1);bx=A[0]+(bx-A[0])*f;by=A[1]+(by-A[1])*f;
         ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(bx,by);ctx.stroke();break;}
       ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(bx,by);ctx.stroke();
     }
