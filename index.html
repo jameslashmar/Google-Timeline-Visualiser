@@ -744,7 +744,7 @@ for(const th of["dash","roadbook","dark"])document.getElementById("theme-"+th).d
 let DATA=null, POS=[], DAYS=new Map(); // POS: [tsMillis, iso, lat, lng, speed, alt, source]
 
 const $=id=>document.getElementById(id);
-const APP_VERSION="v1.7";   // bump on each deploy so you can confirm the live site is the latest
+const APP_VERSION="v1.8";   // bump on each deploy so you can confirm the live site is the latest
 if($("verTag"))$("verTag").textContent=APP_VERSION;
 // major-cities dataset (name,lat,lon,popThousands), sorted by pop desc — for crisp vector place labels
 let CITIES=null,_citiesP=null;
@@ -945,19 +945,20 @@ async function renderCard(ctx, layout, W, H, pos, opts){
            [$("sBends").textContent,"bends (L/R)"]];
   const twVfs=W*(horiz?0.026:0.032);
   const twPad=Math.round(W*0.008);
-  const mapW=horiz?Math.round(W*0.64):0;   // widescreen: give the map more of the frame
-  const twW=horiz?(W-(M+mapW+M)-M):(W-2*M);            // twistiness column width (known up front)
+  const mapW=horiz?Math.round(W*0.665):0;   // widescreen: give the map more of the frame
+  const sxH=horiz?M+mapW+Math.round(M*0.5):0;          // stats column pulled closer to the map
+  const twW=horiz?(W-sxH-M):(W-2*M);                   // twistiness column width (known up front)
   // word-wrap the (variable-length) twistiness subtitle to fit twW at the label font
   ctx.font=mono(kFs);
   const twFull=$("sTwistK").textContent.toUpperCase(), twLines=[];
   {let line=""; for(const w of twFull.split(" ")){const t=line?line+" "+w:w;
     if(ctx.measureText(t).width>twW&&line){twLines.push(line);line=w;}else line=t;} if(line)twLines.push(line);}
   const twH=twPad+twVfs*1.15+twLines.length*kFs*1.5;   // height of the twistiness banner body
-  let cells,twX,twY,tr,proj=null;
+  let cells,twX,twY,tr,proj=null,mapFade=0;
   if(horiz){
     // widescreen: big map on the left, metric column on the right spread to full height
     tr={x:M,y:headH,w:mapW,h:H-headH-M};
-    const sx=M+mapW+M;
+    const sx=sxH;
     const colH=H-headH-M, preTw=Math.round(W*0.012);
     const stride=(colH-twH-preTw)/S.length;            // distribute 6 rows down the column
     cells=S.map((s2,i)=>({s:s2,x:sx,y:Math.round(headH+i*stride)}));
@@ -966,10 +967,13 @@ async function renderCard(ctx, layout, W, H, pos, opts){
     const cols=layout==="vertical"?2:3;
     const rowH=Math.round(labOff+kFs+W*0.03);
     const nRows=Math.ceil(S.length/cols);
-    const mapStatsGap=Math.round(W*0.03), statsTwGap=Math.round(W*0.012);
+    const statsTwGap=Math.round(W*0.012);
     const bottomH=nRows*rowH+statsTwGap+twH;
-    tr={x:M,y:headH,w:W-2*M,h:H-M-headH-mapStatsGap-bottomH};
-    const cw=(W-2*M)/cols, gy=tr.y+tr.h+mapStatsGap;
+    const gy=H-M-bottomH;                              // stats block anchored to the card bottom
+    const ov=Math.round(H*0.065);                      // map runs on under the stats a little…
+    mapFade=ov+Math.round(H*0.10);                     // …behind a bottom fade the stats sit on
+    tr={x:M,y:headH,w:W-2*M,h:gy-headH+ov};
+    const cw=(W-2*M)/cols;
     cells=S.map((s2,i)=>({s:s2,x:M+(i%cols)*cw,y:gy+Math.floor(i/cols)*rowH}));
     twX=M;twY=gy+nRows*rowH+statsTwGap;
   }
@@ -996,12 +1000,14 @@ async function renderCard(ctx, layout, W, H, pos, opts){
     while(z>4&&tileCount(z)>320)z--;
     const scale=2**z*256;
     const spanX=(lon2x(maxLo)-lon2x(minLo))*scale||1, spanY=(lat2y(minLa)-lat2y(maxLa))*scale||1;
-    const kk=Math.min(tr.w/spanX,tr.h/spanY);            // fills the region (bbox pad is the margin)
+    // route fits the VISIBLE part of the region (above the bottom fade); tiles still fill all of it
+    const fitH=mapFade?tr.h-Math.round(mapFade*0.7):tr.h;
+    const kk=Math.min(tr.w/spanX,fitH/spanY);            // fills the region (bbox pad is the margin)
     const cx=(lon2x(minLo)+lon2x(maxLo))/2*scale, cy=(lat2y(maxLa)+lat2y(minLa))/2*scale;
-    const ox=tr.x+tr.w/2-cx*kk, oy=tr.y+tr.h/2-cy*kk;
+    const ox=tr.x+tr.w/2-cx*kk, oy=tr.y+fitH/2-cy*kk;
     ctx.save();ctx.beginPath();ctx.rect(tr.x,tr.y,tr.w,tr.h);ctx.clip();
-    const tx0=Math.floor((cx-(tr.w/2)/kk)/256),tx1=Math.floor((cx+(tr.w/2)/kk)/256);
-    const ty0=Math.floor((cy-(tr.h/2)/kk)/256),ty1=Math.floor((cy+(tr.h/2)/kk)/256);
+    const tx0=Math.floor(((tr.x-ox)/kk)/256),tx1=Math.floor(((tr.x+tr.w-ox)/kk)/256);
+    const ty0=Math.floor(((tr.y-oy)/kk)/256),ty1=Math.floor(((tr.y+tr.h-oy)/kk)/256);
     // no-labels basemap — place names drawn as crisp vector labels below (same system as the flythrough)
     const baseStyle=P.tiles.replace(/_all$/,"_nolabels").replace(/(voyager)$/,"$1_nolabels");
     const jobs=[];
@@ -1058,15 +1064,17 @@ async function renderCard(ctx, layout, W, H, pos, opts){
     try{
       await loadCities();
       const dayOf2=p=>p[7]||((p[1]||"").slice(0,10));
-      const minPop=Math.max(16,tr.w*kmPerPx*0.22);       // density scales with the visible span
+      const minPop=Math.max(6,tr.w*kmPerPx*0.16);        // density scales with the visible span
       const cpts=(CITIES||[]).filter(c=>c[1]>=minLa&&c[1]<=maxLa&&c[2]>=minLo&&c[2]<=maxLo)
         .map(c=>({name:c[0],pop:c[3],la:c[1],lo:c[2],forced:false,visited:false}));
       { // force a label at the start/end of the route, every day and every segment break
         const bnd=new Set([0,pos.length-1]);
         for(let i=1;i<pos.length;i++){const dt=pos[i][0]-pos[i-1][0];
           if((dt<=0)||(dt>GAP&&hav(pos[i-1][2],pos[i-1][3],pos[i][2],pos[i][3])>2)||dayOf2(pos[i])!==dayOf2(pos[i-1])){bnd.add(i);bnd.add(i-1);}}
-        for(const idx of bnd){const la=pos[idx][2],lo=pos[idx][3];let best=null,bd=40;
-          for(const c of cpts){const d=hav(la,lo,c.la,c.lo);if(d<bd){bd=d;best=c;}}
+        // weighted: a 10× bigger town wins unless it's much further (León beats its suburb)
+        for(const idx of bnd){const la=pos[idx][2],lo=pos[idx][3];let best=null,bs=Infinity;
+          for(const c of cpts){const d=hav(la,lo,c.la,c.lo);if(d>40)continue;
+            const s4=d-6*Math.log10(Math.max(c.pop,5));if(s4<bs){bs=s4;best=c;}}
           if(best)best.forced=true;}
       }
       { // towns the route actually rode through (≤4 km) get the amber "visited" colour
@@ -1078,17 +1086,20 @@ async function renderCard(ctx, layout, W, H, pos, opts){
       const mD=Math.min(tr.w,tr.h);
       ctx.textAlign="left";ctx.textBaseline="middle";
       const drawn=[];
+      const yCut=mapFade?Math.round(mapFade*0.75):Math.round(W*0.03);   // stay clear of the bottom fade
       for(const c of cand){
-        if(drawn.length>=30)break;                       // keep the card clean
+        if(drawn.length>=40)break;                       // keep the card clean
         const sx=X(c.lo),sy=Y(c.la);
-        if(sx<tr.x+8||sx>tr.x+tr.w-10||sy<tr.y+12||sy>tr.y+tr.h-Math.round(W*0.03))continue;
+        if(sx<tr.x+8||sx>tr.x+tr.w-10||sy<tr.y+12||sy>tr.y+tr.h-yCut)continue;
         const big=c.pop>=220;
         const fs=Math.round((c.visited?1.25:1)*Math.min(mD*0.030,Math.max(mD*0.016,mD*0.013*(1+Math.log10(Math.max(c.pop,25)/40)))));
         ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
         const tw2=ctx.measureText(c.name).width;
         let dx=sx+fs*0.55, right=false;                  // flip to the left of the dot at the right edge
         if(dx+tw2>tr.x+tr.w-8){dx=sx-fs*0.55;right=true; if(dx-tw2<tr.x+6)continue;}
-        const rect=right?[dx-tw2-2,sy-fs*0.65,tw2+4,fs*1.3]:[dx-2,sy-fs*0.65,tw2+4,fs*1.3];
+        // collision rect spans dot AND text so a neighbour can't cram against the marker
+        const rL=right?dx-tw2-2:sx-fs*0.35, rR=right?sx+fs*0.35:dx+tw2+2;
+        const rect=[rL,sy-fs*0.65,rR-rL,fs*1.3];
         let ov=false;for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1]){ov=true;break;}}
         if(ov)continue; drawn.push(rect);
         const txt=c.visited?"#FFD37A":(big?"#C7E4FF":"#9AA6B4");
@@ -1101,11 +1112,25 @@ async function renderCard(ctx, layout, W, H, pos, opts){
       ctx.textAlign="left";
       ctx.textBaseline="top";
     }catch(e){console.warn("card labels skipped:",e&&e.message);}
-    ctx.font=mono(W*0.0085);ctx.fillStyle=P.sub;ctx.textAlign="right";
-    ctx.fillText("© OPENSTREETMAP © CARTO",tr.x+tr.w-8,tr.y+tr.h-Math.round(W*0.014));
-    ctx.textAlign="left";
+    if(mapFade){   // vertical/square: map fades into the card bottom so the stats sit on it
+      const h2=P.bg.replace("#",""), n2=parseInt(h2.length===3?h2.split("").map(c2=>c2+c2).join(""):h2,16);
+      const rgb=`${n2>>16&255},${n2>>8&255},${n2&255}`;
+      const g2=ctx.createLinearGradient(0,tr.y+tr.h-mapFade,0,tr.y+tr.h-mapFade*0.3);
+      g2.addColorStop(0,`rgba(${rgb},0)`);g2.addColorStop(1,`rgba(${rgb},1)`);
+      ctx.fillStyle=g2;ctx.fillRect(tr.x,tr.y+tr.h-mapFade,tr.w,mapFade);
+    }
+    if(horiz){
+      ctx.font=mono(W*0.0085);ctx.fillStyle=P.sub;ctx.textAlign="right";
+      ctx.fillText("© OPENSTREETMAP © CARTO",tr.x+tr.w-8,tr.y+tr.h-Math.round(W*0.014));
+      ctx.textAlign="left";
+    }
     ctx.restore();
-    ctx.strokeStyle=P.grid;ctx.lineWidth=2;ctx.strokeRect(tr.x,tr.y,tr.w,tr.h);
+    if(horiz){ctx.strokeStyle=P.grid;ctx.lineWidth=2;ctx.strokeRect(tr.x,tr.y,tr.w,tr.h);}
+    else{   // full-bleed map (no border) → attribution at the very bottom-right of the card
+      ctx.font=mono(W*0.0085);ctx.fillStyle=P.sub;ctx.textAlign="right";ctx.textBaseline="bottom";
+      ctx.fillText("© OPENSTREETMAP © CARTO",W-Math.round(W*0.012),H-Math.round(W*0.009));
+      ctx.textAlign="left";ctx.textBaseline="top";
+    }
     proj={X,Y,bucket,tr,P,W};        // hand projection to the animated track pass
   }
   // ---- stats grid (geometry computed above; draw the metric cells) ----
@@ -2317,8 +2342,10 @@ async function flythrough(layout){
   {
     const bnd=new Set([0,pos.length-1]);
     for(let i=1;i<pos.length;i++){ if(brk[i]||dayOf(pos[i])!==dayOf(pos[i-1])){ bnd.add(i); bnd.add(i-1); } }
-    for(const idx of bnd){ const la=pos[idx][2],lo=pos[idx][3]; let best=null,bd=40;   // ≤40 km or unnameable
-      for(const c of cityPts){ const d=hav(la,lo,c.la,c.lo); if(d<bd){bd=d;best=c;} }
+    // ≤40 km or unnameable; weighted so a 10× bigger town wins unless much further
+    for(const idx of bnd){ const la=pos[idx][2],lo=pos[idx][3]; let best=null,bs=Infinity;
+      for(const c of cityPts){ const d=hav(la,lo,c.la,c.lo); if(d>40)continue;
+        const s4=d-6*Math.log10(Math.max(c.pop,5)); if(s4<bs){bs=s4;best=c;} }
       if(best)best.forced=true; }
   }
   // mark cities the route actually rode THROUGH (~≤4 km from the track) — these get the amber
@@ -2407,14 +2434,16 @@ async function flythrough(layout){
   // visible span (only big cities when zoomed out), size scales with population, overlaps declutter
   const BIGPOP=220;   // ≥220k pop → major city (light blue), below → town (grey)
   let cityShown=new Set();   // names drawn last frame → priority to stay drawn (kills flicker)
+  const cityBorn=new Map(), citySide=new Map();   // first-shown time (entry fade-in) + sticky flip side
   function drawCities(k,scx,scy,cwx,cwy){
     if(!cityPts.length)return;
     // density scales with the visible span: only big cities when zoomed out, more towns zoomed in.
-    // NO alpha fade — labels are solid. Day/segment endpoints (.forced) always qualify.
-    const visKm=(W/k)*kmPerPx, minPop=Math.max(16,visKm*0.28);
+    // Steady-state labels are solid (no fade = no flicker); a one-way 250 ms fade-IN softens entry.
+    const visKm=(W/k)*kmPerPx, minPop=Math.max(8,visKm*0.28);
     // text grows toward detail (up to 1.5×) while the overview scale stays as-is
     const zt=Math.max(0,Math.min(1,(k-kOver)/((kDetail-kOver)||1))), sizeMul=1+0.5*zt;
-    const yMax=horiz?H*0.97:H*0.60, xMax=horiz?W*0.68:W*0.97;   // keep out of the stat panel
+    const yMax=horiz?H*0.97:H*0.62, xMax=horiz?W*0.68:W*0.97;   // keep out of the stat panel
+    const nowT=performance.now();
     // candidates: forced day/segment endpoints + towns the route passed through (.visited) + any
     // city above the zoom threshold. Resolve overlaps by a STABLE score so a label shown last frame
     // keeps its slot — stickiness is only a 1.4× pop boost, so a small town can never block a bigger
@@ -2425,30 +2454,41 @@ async function flythrough(layout){
     // asymmetric hysteresis: a label only STARTS showing once comfortably inside the frame, then is
     // KEPT until it drifts well past the edge — a wide dead-band so a town teetering on the boundary
     // (as the follow-cam wobbles on twisty sections) can't blink on and off.
-    const app=W*0.05, keep=W*0.10;
+    const app=W*0.05, keep=W*0.10, yTop=H*0.055;   // yTop clears the header text zone
     for(const c of cand){
       const sx=(c.wx-cwx)*k+scx, sy=(c.wy-cwy)*k+scy, on=cityShown.has(c.name);
       const xLo=on?-40-keep:W*0.012, xHi=on?xMax+keep:xMax-app;
-      const yLo=on?H*0.02-keep:H*0.02+app, yHi=on?yMax+keep:yMax-app;
+      const yLo=on?yTop-keep:yTop+app, yHi=on?yMax+keep:yMax-app;
       if(sx<xLo||sx>xHi||sy<yLo||sy>yHi)continue;
       const vMul=c.visited?1+0.5*(1-zt):1;   // visited towns 1.5× on the overview, tapering to 1× at detail
       const fs=Math.round(sizeMul*vMul*Math.min(W*0.028,Math.max(W*0.0125,W*0.0085*(1+Math.log10(Math.max(c.pop,25)/40)))));
       ctx.font=`600 ${fs}px 'IBM Plex Mono',monospace`;
       const tw=ctx.measureText(c.name).width;
-      let dx=sx+fs*0.55, rAl=false;           // flip to the left of the dot at the right edge
-      if(dx+tw>xMax-4){dx=sx-fs*0.55;rAl=true; if(dx-tw<4)continue;}
-      const rect=rAl?[dx-tw-2,sy-fs*0.65,tw+4,fs*1.3]:[dx-2,sy-fs*0.65,tw+4,fs*1.3];
+      // side of the dot is decided ONCE per shown streak and kept — recomputing per frame
+      // made edge labels jump left/right of their dot as the camera panned
+      let rAl=on&&citySide.has(c.name)?citySide.get(c.name):(sx+fs*0.55+tw>xMax-4);
+      let dx=rAl?sx-fs*0.55:sx+fs*0.55;
+      if(!rAl&&dx+tw>xMax-4){rAl=true;dx=sx-fs*0.55;}   // fresh label that would clip → flip left
+      if(rAl&&dx-tw<4)continue;
+      // collision rect spans dot AND text so a neighbour can't cram against the marker
+      const rL=rAl?dx-tw-2:sx-fs*0.35, rR=rAl?sx+fs*0.35:dx+tw+2;
+      const rect=[rL,sy-fs*0.65,rR-rL,fs*1.3];
       let ov=false; for(const r of drawn){if(rect[0]<r[0]+r[2]&&rect[0]+rect[2]>r[0]&&rect[1]<r[1]+r[3]&&rect[1]+rect[3]>r[1]){ov=true;break;}}
-      if(ov)continue; drawn.push(rect); now.add(c.name);
+      if(ov)continue; drawn.push(rect); now.add(c.name); citySide.set(c.name,rAl);
+      if(!cityBorn.has(c.name))cityBorn.set(c.name,nowT);
+      const fadeA=Math.min(1,(nowT-cityBorn.get(c.name))/250+0.15);   // one-way entry fade-in
       // visited = amber (you rode through it) · major city = light blue · other town = grey
       const big=c.pop>=BIGPOP;
       const txt=c.visited?"#FFD37A":(big?"#C7E4FF":"#9AA6B4");
       const dot=c.visited?"rgba(255,205,110,.95)":(big?"rgba(147,198,255,.9)":"rgba(150,162,178,.8)");
+      ctx.save();ctx.globalAlpha=fadeA;
       ctx.fillStyle=dot;ctx.beginPath();ctx.arc(sx,sy,Math.max(1.6,fs*0.13),0,7);ctx.fill();
       ctx.textAlign=rAl?"right":"left";
       ctx.fillStyle="rgba(0,0,0,.75)";ctx.fillText(c.name,dx+1.5,sy+1.5);
       ctx.fillStyle=txt;ctx.fillText(c.name,dx,sy);
+      ctx.restore();
     }
+    for(const n of [...cityBorn.keys()])if(!now.has(n)){cityBorn.delete(n);citySide.delete(n);}
     cityShown=now; ctx.textAlign="left"; ctx.textBaseline="top";
   }
   // ---- record ----
